@@ -52,6 +52,22 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		return resp, nil
 	}
+	// 401 retry semantics: req.Clone (used inside do) does NOT clone the body.
+	// The first attempt's body reader has already been consumed by the
+	// underlying transport. To retry safely we need a fresh reader. Go's
+	// http.NewRequestWithContext populates req.GetBody for the standard
+	// in-memory body types (*bytes.Buffer, *bytes.Reader, *strings.Reader),
+	// which is exactly what oapi-codegen generates for POST/PUT/PATCH bodies.
+	//
+	// If req has a body but no GetBody, the body is non-replayable (e.g. an
+	// arbitrary io.Reader). In that case we surface the original 401 to the
+	// caller rather than silently retrying with an empty body, which would
+	// almost certainly fail the server's request validation and produce a
+	// confusing error. The caller can map 401 to ErrSessionExpired and
+	// prompt the user to re-login.
+	if req.Body != nil && req.GetBody == nil {
+		return resp, nil
+	}
 	// First 401: drain & close so the connection can be reused, then force a
 	// token refresh and retry exactly once.
 	resp.Body.Close()
@@ -69,6 +85,18 @@ func (t *Transport) do(req *http.Request) (*http.Response, error) {
 	cloned := req.Clone(req.Context())
 	if cloned.Header == nil {
 		cloned.Header = make(http.Header)
+	}
+	// req.Clone does not clone the body. Re-derive the body from GetBody so
+	// the second (retry) attempt sends the same bytes the first one did.
+	// On the first attempt this is functionally equivalent to leaving Body
+	// alone (GetBody returns an equivalent reader), but it keeps the retry
+	// path symmetric with the first-attempt path.
+	if req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, err
+		}
+		cloned.Body = body
 	}
 	cloned.Header.Set("Authorization", "Bearer "+tok)
 	if t.CLIVersion != "" {
