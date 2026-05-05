@@ -126,6 +126,82 @@ func TestTokenCache_ConcurrentRefreshesCoalesce(t *testing.T) {
 	}
 }
 
+// TestTokenCache_PersistDoesNotBlockConcurrentReaders verifies the C2 fix:
+// while the persist callback is in flight (here gated by a chan), a
+// concurrent AccessToken caller observing the freshly-refreshed in-memory
+// token must NOT block on the cache mutex. If persist were invoked while
+// holding c.mu, the second caller would queue behind it and time out.
+func TestTokenCache_PersistDoesNotBlockConcurrentReaders(t *testing.T) {
+	persistGate := make(chan struct{})
+	persistEntered := make(chan struct{})
+	c := NewTokenCache(Tokens{
+		AccessToken:  "STALE",
+		RefreshToken: "RT0",
+		// Within the skew window → the first caller refreshes.
+		ExpiresAt: time.Now().Add(10 * time.Second),
+	}, func(ctx context.Context, rt string) (Tokens, error) {
+		return Tokens{
+			AccessToken:  "FRESH",
+			RefreshToken: "RT1",
+			// Far in the future so the second caller hits the fast path.
+			ExpiresAt: time.Now().Add(time.Hour),
+		}, nil
+	}, func(Tokens) error {
+		close(persistEntered)
+		<-persistGate // hold persist until the second caller has returned
+		return nil
+	})
+
+	// First caller refreshes and then blocks inside persist.
+	first := make(chan error, 1)
+	go func() {
+		_, err := c.AccessToken(context.Background())
+		first <- err
+	}()
+
+	// Wait until the first caller is inside persist (so the in-memory cache
+	// has been updated and the mutex has been released).
+	select {
+	case <-persistEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first AccessToken did not reach persist within 2s")
+	}
+
+	// Second caller MUST return immediately with the fresh in-memory token.
+	type result struct {
+		tok string
+		err error
+	}
+	second := make(chan result, 1)
+	go func() {
+		tok, err := c.AccessToken(context.Background())
+		second <- result{tok, err}
+	}()
+
+	select {
+	case r := <-second:
+		if r.err != nil {
+			t.Fatalf("second AccessToken: %v", r.err)
+		}
+		if r.tok != "FRESH" {
+			t.Errorf("second AccessToken = %q, want FRESH", r.tok)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("second AccessToken blocked while persist was in flight")
+	}
+
+	// Release persist, then make sure the first caller finishes cleanly.
+	close(persistGate)
+	select {
+	case err := <-first:
+		if err != nil {
+			t.Errorf("first AccessToken: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first AccessToken did not return after persist released")
+	}
+}
+
 func TestTokenCache_SurfacesSessionExpired(t *testing.T) {
 	c := NewTokenCache(Tokens{
 		AccessToken:  "STALE",

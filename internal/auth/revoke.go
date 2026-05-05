@@ -36,13 +36,3 @@ func Revoke(ctx context.Context, auth0Domain, clientID, refreshToken string) err
 	}
 	return nil
 }
-
-// SetAuthBaseURLForTest overrides the package-level Auth0 base URL and
-// returns a restore function. Tests use this to point auth code at an
-// httptest server. Not safe for concurrent test use — wrap calls in the
-// authBaseURLMu test mutex when running parallel tests in the same package.
-func SetAuthBaseURLForTest(u string) (restore func()) {
-	prev := authBaseURL
-	authBaseURL = func(_ string) string { return u }
-	return func() { authBaseURL = prev }
-}

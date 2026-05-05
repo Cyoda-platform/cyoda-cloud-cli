@@ -14,12 +14,6 @@ import (
 	"time"
 )
 
-// authBaseURLMu serialises tests that override the package-level authBaseURL.
-// Without it, parallel tests would race on the global. The flow tests below
-// take the lock; lightweight tests in pkce_test.go avoid the global and can
-// run with t.Parallel().
-var authBaseURLMu sync.Mutex
-
 // withFakeAuth0 stands up an httptest server that emulates Auth0's /authorize
 // (302 to the redirect_uri with a code+state) and /oauth/token (returning the
 // supplied JSON body and status). It overrides the package-private

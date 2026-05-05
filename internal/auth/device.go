@@ -45,6 +45,14 @@ const defaultDeviceInterval = 5 * time.Second
 // (RFC 8628 §3.5), and on a slow_down response increases the interval by
 // 5 seconds per RFC 8628 §3.5. Note: docs/plan.md says "double" the interval —
 // we deliberately follow the RFC instead.
+//
+// Expiry is enforced LOCALLY: a deadline is computed from the
+// /oauth/device/code response's expires_in at request time, and each loop
+// iteration checks nowFunc().After(deadline) before polling. This means we
+// stop polling once our local clock says the code has expired, regardless of
+// whether the server later returns an "expired_token" error code. Both paths
+// surface as ErrDeviceCodeExpired to the caller; the local check just bounds
+// how long we wait if the server is slow to acknowledge the expiry.
 func LoginDevice(ctx context.Context, cfg LoopbackConfig) (Tokens, error) {
 	stderr := cfg.Stderr
 	if stderr == nil {
