@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,6 +50,42 @@ func TestFetchDiscoveryFileScheme(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.APIURL != "https://api.cyoda.cloud" || got.Auth0Domain != "tenant.eu.auth0.com" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestFetchDiscoveryFileSchemeRejectsNonLocalHost(t *testing.T) {
+	// "file://relative/path" parses with Host="relative", Path="/path", which
+	// is almost certainly a user mistake (they meant file:///abs/path or
+	// file:relative/path). Reject it explicitly rather than silently dropping
+	// the host segment.
+	_, err := FetchDiscovery("file://somehost/etc/passwd")
+	if err == nil {
+		t.Fatal("expected error for file:// URL with non-local host, got nil")
+	}
+	if !strings.Contains(err.Error(), "must have empty or \"localhost\" host") {
+		t.Errorf("error %q does not mention host requirement", err)
+	}
+}
+
+func TestFetchDiscoveryFileSchemeAllowsLocalhostHost(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cyoda-cloud-cli.json")
+	body := []byte(`{
+		"api_url":"https://api.cyoda.cloud",
+		"auth0_domain":"tenant.eu.auth0.com",
+		"auth0_client_id":"native-client-id",
+		"auth0_audience":"https://api.cyoda.cloud"
+	}`)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := FetchDiscovery("file://localhost" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.APIURL != "https://api.cyoda.cloud" {
 		t.Fatalf("got %+v", got)
 	}
 }

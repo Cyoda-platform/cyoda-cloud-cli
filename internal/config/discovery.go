@@ -9,7 +9,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
+
+	"github.com/cyoda-platform/cyoda-cloud-cli/internal/version"
 )
 
 // Discovery is the well-known document describing the Cyoda Cloud deployment
@@ -26,6 +30,15 @@ const DefaultDiscoveryURL = "https://cyoda.cloud/.well-known/cyoda-cloud-cli.jso
 
 const cacheTTL = 24 * time.Hour
 
+// maxDiscoveryBody caps the response body to 64 KiB; the document is tiny and
+// we don't want a hostile or misconfigured server to push us into OOM.
+const maxDiscoveryBody = 64 * 1024
+
+// discoveryClient is the package-private HTTP client used to fetch the
+// discovery document. The Timeout covers the full request, so callers don't
+// need to layer on a context.WithTimeout.
+var discoveryClient = &http.Client{Timeout: 10 * time.Second}
+
 // FetchDiscovery retrieves and decodes the discovery document at the given URL.
 // Supports https:// (and http:// for tests) plus a file:// scheme for local
 // development.
@@ -41,13 +54,16 @@ func FetchDiscovery(rawURL string) (Discovery, error) {
 }
 
 func fetchDiscoveryHTTP(rawURL string) (Discovery, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	// Use context.Background so callers/tests can swap a different context in
+	// the future if desired; the client Timeout already bounds the request.
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawURL, nil)
 	if err != nil {
 		return Discovery{}, fmt.Errorf("discovery: build request: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", version.UserAgent(version.Version, runtime.GOOS, runtime.GOARCH))
+
+	resp, err := discoveryClient.Do(req)
 	if err != nil {
 		return Discovery{}, err
 	}
@@ -55,13 +71,24 @@ func fetchDiscoveryHTTP(rawURL string) (Discovery, error) {
 	if resp.StatusCode != http.StatusOK {
 		return Discovery{}, fmt.Errorf("discovery: status %d", resp.StatusCode)
 	}
-	return decodeDiscovery(resp.Body)
+	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "application/json") {
+		return Discovery{}, fmt.Errorf("discovery: unexpected content-type %q", ct)
+	}
+	body := io.LimitReader(resp.Body, maxDiscoveryBody)
+	return decodeDiscovery(body)
 }
 
 func fetchDiscoveryFile(u *url.URL) (Discovery, error) {
+	// Per RFC 8089 the host on a file:// URL is empty or "localhost"; anything
+	// else is a malformed/relative URL (e.g. file://relative/path parses with
+	// Host="relative", Path="/path") and we reject it explicitly.
+	if u.Host != "" && u.Host != "localhost" {
+		return Discovery{}, fmt.Errorf("discovery: file:// URL must have empty or \"localhost\" host (got %q)", u.Host)
+	}
 	path := u.Path
-	if path == "" {
-		// e.g. file://relative/path — uncommon but tolerate.
+	// Fallback for opaque file: URLs without "//" — e.g. file:relative/path —
+	// where Host and Path are both empty and the path lives in Opaque.
+	if path == "" && u.Host == "" {
 		path = u.Opaque
 	}
 	f, err := os.Open(path)
@@ -128,6 +155,9 @@ func readFreshCache(path string) (Discovery, bool) {
 	return c.Data, true
 }
 
+// writeCache atomically writes the discovery cache: write to a tmp file with
+// mode 0600, then rename into place. On any failure we best-effort remove the
+// tmp file.
 func writeCache(path string, d Discovery) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -136,5 +166,23 @@ func writeCache(path string, d Discovery) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o600)
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }

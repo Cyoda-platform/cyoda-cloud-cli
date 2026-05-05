@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -91,8 +92,8 @@ func useFallback() bool {
 
 var (
 	fallbackWarnOnce sync.Once
-	// warnSink is overridable in tests if needed; defaults to stderr.
-	warnSink = os.Stderr
+	// warnSink is overridable in tests; defaults to stderr.
+	warnSink io.Writer = os.Stderr
 )
 
 func warnFallbackOnce() {
@@ -110,22 +111,24 @@ func credentialsPath() string {
 	return filepath.Join(config.ConfigDir(), "credentials")
 }
 
-type fileStore_ struct {
+// credentialsFile is the on-disk fallback layout: a single file holding all
+// known profiles keyed by organization slug.
+type credentialsFile struct {
 	Profiles map[string]Profile `json:"profiles"`
 }
 
-func readFile() (fileStore_, error) {
+func readCredentials() (credentialsFile, error) {
 	path := credentialsPath()
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fileStore_{Profiles: map[string]Profile{}}, nil
+			return credentialsFile{Profiles: map[string]Profile{}}, nil
 		}
-		return fileStore_{}, fmt.Errorf("keychain file read: %w", err)
+		return credentialsFile{}, fmt.Errorf("keychain file read: %w", err)
 	}
-	var fs fileStore_
+	var fs credentialsFile
 	if err := json.Unmarshal(b, &fs); err != nil {
-		return fileStore_{}, fmt.Errorf("keychain file decode: %w", err)
+		return credentialsFile{}, fmt.Errorf("keychain file decode: %w", err)
 	}
 	if fs.Profiles == nil {
 		fs.Profiles = map[string]Profile{}
@@ -133,7 +136,11 @@ func readFile() (fileStore_, error) {
 	return fs, nil
 }
 
-func writeFile(fs fileStore_) error {
+// writeCredentials atomically replaces the credentials file: write to a tmp
+// file with explicit mode 0600 (so we don't inherit looser perms from a
+// pre-existing file on systems where WriteFile ignores mode), then rename
+// into place. On any failure we best-effort remove the tmp file.
+func writeCredentials(fs credentialsFile) error {
 	path := credentialsPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("keychain file mkdir: %w", err)
@@ -142,24 +149,38 @@ func writeFile(fs fileStore_) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, b, 0o600); err != nil {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
 		return fmt.Errorf("keychain file write: %w", err)
 	}
-	// Re-apply mode in case the file already existed with looser perms.
-	return os.Chmod(path, 0o600)
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("keychain file write: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("keychain file write: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("keychain file rename: %w", err)
+	}
+	return nil
 }
 
 func fileStore(p Profile) error {
-	fs, err := readFile()
+	fs, err := readCredentials()
 	if err != nil {
 		return err
 	}
 	fs.Profiles[p.Org] = p
-	return writeFile(fs)
+	return writeCredentials(fs)
 }
 
 func fileLoad(org string) (Profile, error) {
-	fs, err := readFile()
+	fs, err := readCredentials()
 	if err != nil {
 		return Profile{}, err
 	}
@@ -171,7 +192,7 @@ func fileLoad(org string) (Profile, error) {
 }
 
 func fileDelete(org string) error {
-	fs, err := readFile()
+	fs, err := readCredentials()
 	if err != nil {
 		return err
 	}
@@ -179,5 +200,5 @@ func fileDelete(org string) error {
 		return ErrNotFound
 	}
 	delete(fs.Profiles, org)
-	return writeFile(fs)
+	return writeCredentials(fs)
 }

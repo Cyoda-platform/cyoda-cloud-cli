@@ -1,6 +1,7 @@
 package keychain
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -69,5 +70,45 @@ func TestFileFallback(t *testing.T) {
 	// Delete on missing should also return ErrNotFound (parity with go-keyring).
 	if err := Delete("acme"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Delete(missing) err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestFallbackWarningFiresOnce verifies that the "you are using file
+// fallback" warning is emitted exactly once across multiple operations,
+// even after repeated Store calls.
+func TestFallbackWarningFiresOnce(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpHome)
+	t.Setenv("CYODA_KEYCHAIN_FILE_FALLBACK", "1")
+
+	resetFallbackWarning()
+
+	var buf bytes.Buffer
+	prev := warnSink
+	warnSink = &buf
+	t.Cleanup(func() { warnSink = prev })
+
+	p := Profile{
+		Org:           "acme",
+		RefreshToken:  "rt-1",
+		APIURL:        "https://api.cyoda.cloud",
+		Auth0Domain:   "tenant.eu.auth0.com",
+		Auth0ClientID: "native-client-id",
+		Auth0Audience: "https://api.cyoda.cloud",
+	}
+
+	if err := Store(p); err != nil {
+		t.Fatalf("Store #1: %v", err)
+	}
+	first := buf.String()
+	if first == "" {
+		t.Fatalf("expected warning after first Store, buffer was empty")
+	}
+
+	if err := Store(p); err != nil {
+		t.Fatalf("Store #2: %v", err)
+	}
+	if got := buf.String(); got != first {
+		t.Errorf("warning buffer changed after second Store:\nfirst:  %q\nsecond: %q", first, got)
 	}
 }
