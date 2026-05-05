@@ -301,13 +301,3 @@ func TestLoginPKCE_BrowserOpenFailureFallsBack(t *testing.T) {
 	}
 }
 
-func TestLoginDevice_Stub(t *testing.T) {
-	t.Parallel()
-	_, err := LoginDevice(context.Background(), LoopbackConfig{})
-	if err == nil {
-		t.Fatal("expected stub error")
-	}
-	if !strings.Contains(err.Error(), "Task 4") {
-		t.Errorf("expected error to mention Task 4, got %v", err)
-	}
-}
