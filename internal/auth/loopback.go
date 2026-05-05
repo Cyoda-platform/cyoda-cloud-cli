@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -77,7 +78,10 @@ func LoginPKCE(ctx context.Context, cfg LoopbackConfig) (Tokens, error) {
 	if err != nil {
 		return Tokens{}, fmt.Errorf("pkce verifier: %w", err)
 	}
-	state := randomState()
+	state, err := randomState()
+	if err != nil {
+		return Tokens{}, fmt.Errorf("random state: %w", err)
+	}
 
 	// codeCh / errCh are sized 1 so the handler can post and return without
 	// blocking even if the main goroutine has already moved on (e.g. ctx
@@ -93,7 +97,8 @@ func LoginPKCE(ctx context.Context, cfg LoopbackConfig) (Tokens, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if got := q.Get("state"); got != state {
+		got := q.Get("state")
+		if subtle.ConstantTimeCompare([]byte(got), []byte(state)) != 1 {
 			http.Error(w, "state mismatch", http.StatusBadRequest)
 			select {
 			case errCh <- fmt.Errorf("state mismatch"):
@@ -179,10 +184,16 @@ func buildAuthURL(cfg LoopbackConfig, redirectURI string, challenge PKCEChalleng
 	return u.String()
 }
 
-func randomState() string {
+// randomState returns a 128-bit URL-safe random string used as the OAuth
+// state parameter. We bubble rand.Read errors instead of swallowing them —
+// silently returning a zero-byte state would make every concurrent login
+// share the same state and break CSRF validation.
+func randomState() (string, error) {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // openBrowser launches the user's default browser to u. Platform-specific.

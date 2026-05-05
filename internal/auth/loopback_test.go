@@ -27,6 +27,14 @@ var authBaseURLMu sync.Mutex
 // it.
 func withFakeAuth0(t *testing.T, tokenStatus int, tokenBody string) (server *httptest.Server, cleanup func()) {
 	t.Helper()
+	// capturedRedirectURI records the redirect_uri that /authorize received.
+	// /oauth/token then asserts that the form body posted by the client
+	// carries the same value. Auth0 enforces this equality and a regression
+	// would otherwise be silent against the permissive stub.
+	var (
+		mu                  sync.Mutex
+		capturedRedirectURI string
+	)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/authorize", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -42,6 +50,9 @@ func withFakeAuth0(t *testing.T, tokenStatus int, tokenBody string) (server *htt
 			http.Error(w, "bad redirect", http.StatusBadRequest)
 			return
 		}
+		mu.Lock()
+		capturedRedirectURI = redirect
+		mu.Unlock()
 		rq := u.Query()
 		rq.Set("code", "AUTHCODE")
 		rq.Set("state", state)
@@ -49,6 +60,13 @@ func withFakeAuth0(t *testing.T, tokenStatus int, tokenBody string) (server *htt
 		http.Redirect(w, r, u.String(), http.StatusFound)
 	})
 	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		expected := capturedRedirectURI
+		mu.Unlock()
+		if got := r.PostFormValue("redirect_uri"); got != expected {
+			t.Helper()
+			t.Errorf("/oauth/token redirect_uri = %q, want %q", got, expected)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(tokenStatus)
 		_, _ = w.Write([]byte(tokenBody))

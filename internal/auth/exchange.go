@@ -37,6 +37,12 @@ func exchangeToken(ctx context.Context, cfg LoopbackConfig, code string, verifie
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return Tokens{}, fmt.Errorf("token exchange: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
+	// Sniff Content-Type to fail fast on a 200 with HTML/text body — usually
+	// a captive portal or proxy interception. Empty Content-Type is tolerated
+	// because some proxies strip it.
+	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "application/json") {
+		return Tokens{}, fmt.Errorf("token exchange: unexpected content-type %q", ct)
+	}
 	var out struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
@@ -44,7 +50,9 @@ func exchangeToken(ctx context.Context, cfg LoopbackConfig, code string, verifie
 		ExpiresIn    int    `json:"expires_in"`
 		Scope        string `json:"scope"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	// Cap the body at 1 MiB. A well-formed Auth0 token response is well
+	// under 8 KiB; this defends against an unbounded/malicious response.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
 		return Tokens{}, fmt.Errorf("token exchange: decode: %w", err)
 	}
 	return Tokens{
