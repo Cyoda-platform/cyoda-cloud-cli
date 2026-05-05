@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/cyoda-platform/cyoda-cloud-cli/internal/commands"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/version"
 )
 
@@ -22,6 +23,8 @@ func main() {
 			fmt.Println(version.UserAgent(version.Version, runtime.GOOS, runtime.GOARCH))
 		},
 	})
+	root.AddCommand(commands.NewLoginCmd())
+	root.AddCommand(commands.NewRegisterCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
