@@ -202,6 +202,48 @@ func TestTokenCache_PersistDoesNotBlockConcurrentReaders(t *testing.T) {
 	}
 }
 
+// TestTokenCache_InvalidateForcesRefresh verifies that Invalidate zeroes the
+// cached AccessToken/ExpiresAt, so the next AccessToken call re-runs the
+// refresh function even if the original expiry was far in the future. This
+// is the seam used by Transport on a 401 to retry against a fresh token.
+func TestTokenCache_InvalidateForcesRefresh(t *testing.T) {
+	var calls int32
+	c := NewTokenCache(Tokens{
+		AccessToken:  "AT0",
+		RefreshToken: "RT0",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}, func(ctx context.Context, rt string) (Tokens, error) {
+		atomic.AddInt32(&calls, 1)
+		return Tokens{AccessToken: "AT1", RefreshToken: rt, ExpiresAt: time.Now().Add(time.Hour)}, nil
+	}, nil)
+
+	// Before Invalidate: cached.
+	at, err := c.AccessToken(context.Background())
+	if err != nil {
+		t.Fatalf("AccessToken: %v", err)
+	}
+	if at != "AT0" {
+		t.Errorf("AT = %q, want AT0", at)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Errorf("refresh calls before Invalidate = %d, want 0", got)
+	}
+
+	c.Invalidate()
+
+	// After Invalidate: must refresh.
+	at, err = c.AccessToken(context.Background())
+	if err != nil {
+		t.Fatalf("AccessToken: %v", err)
+	}
+	if at != "AT1" {
+		t.Errorf("AT = %q, want AT1", at)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("refresh calls after Invalidate = %d, want 1", got)
+	}
+}
+
 func TestTokenCache_SurfacesSessionExpired(t *testing.T) {
 	c := NewTokenCache(Tokens{
 		AccessToken:  "STALE",

@@ -99,6 +99,22 @@ func (c *TokenCache) AccessToken(ctx context.Context) (string, error) {
 	return newToks.AccessToken, nil
 }
 
+// Invalidate zeroes the cached AccessToken and ExpiresAt under the cache
+// mutex so the next AccessToken call falls through to the refresh path. The
+// stored RefreshToken is preserved (it's the only thing that can mint a new
+// access token).
+//
+// Used by the API Transport when the server returns 401 despite our cache
+// believing the token is still fresh: a server-side revocation, clock skew,
+// or a desynced cache should not strand the caller — Invalidate forces a
+// single retry against a freshly-minted token.
+func (c *TokenCache) Invalidate() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tokens.AccessToken = ""
+	c.tokens.ExpiresAt = time.Time{}
+}
+
 // Tokens returns a copy of the currently cached tokens. Useful for callers
 // that need the refresh token alongside the access token (e.g. logout).
 func (c *TokenCache) Tokens() Tokens {

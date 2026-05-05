@@ -1,0 +1,89 @@
+openapi: 3.1.0
+info:
+  title: Cyoda Cloud API
+  version: 0.1.0
+servers:
+  - url: https://api.cyoda.cloud
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Me:
+      type: object
+      required: [user_id, org_id, tier, roles, scopes, is_cyoda_employee, quota, features]
+      properties:
+        user_id: { type: string }
+        org_id: { type: string }
+        tier: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        scopes:
+          type: array
+          items: { type: string }
+        is_cyoda_employee: { type: boolean }
+        quota:
+          type: object
+          required: [env_deploys, app_deploys]
+          properties:
+            env_deploys: { $ref: '#/components/schemas/QuotaCounter' }
+            app_deploys: { $ref: '#/components/schemas/QuotaCounter' }
+        features:
+          type: object
+          additionalProperties: { type: boolean }
+    QuotaCounter:
+      type: object
+      required: [window, used, limit]
+      properties:
+        window: { type: string }
+        used: { type: integer }
+        limit: { type: integer }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+paths:
+  /v2/me:
+    get:
+      summary: Identity, tier, scopes, quota usage for the authenticated principal
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401':
+          description: unauthenticated
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v2/.well-known/openapi.json:
+    get:
+      summary: Machine-readable OpenAPI spec
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json: {}
+  /v2/.well-known/cli-min-version:
+    get:
+      summary: Minimum CLI version
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  min: { type: string }
