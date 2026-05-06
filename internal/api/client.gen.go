@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,11 +12,40 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
+
+	"github.com/oapi-codegen/runtime"
 )
 
 const (
 	BearerScopes = "bearer.Scopes"
 )
+
+// Defines values for GetV2BuildsParamsAction.
+const (
+	GetV2BuildsParamsActionBuild  GetV2BuildsParamsAction = "build"
+	GetV2BuildsParamsActionDeploy GetV2BuildsParamsAction = "deploy"
+	GetV2BuildsParamsActionEnv    GetV2BuildsParamsAction = "env"
+)
+
+// Defines values for PostV2BuildsJSONBodyAction.
+const (
+	PostV2BuildsJSONBodyActionBuild  PostV2BuildsJSONBodyAction = "build"
+	PostV2BuildsJSONBodyActionDeploy PostV2BuildsJSONBodyAction = "deploy"
+)
+
+// Build defines model for Build.
+type Build struct {
+	Action          *string    `json:"action,omitempty"`
+	BuildId         string     `json:"build_id"`
+	ChatId          *string    `json:"chat_id,omitempty"`
+	CreatedAt       *time.Time `json:"created_at,omitempty"`
+	JobStatus       *string    `json:"job_status,omitempty"`
+	JobStatusText   *string    `json:"job_status_text,omitempty"`
+	PipelineName    *string    `json:"pipeline_name,omitempty"`
+	State           string     `json:"state"`
+	TeamcityBuildId *string    `json:"teamcity_build_id,omitempty"`
+}
 
 // Me defines model for Me.
 type Me struct {
@@ -47,6 +77,52 @@ type QuotaCounter struct {
 	Used   int    `json:"used"`
 	Window string `json:"window"`
 }
+
+// GetV2BuildsParams defines parameters for GetV2Builds.
+type GetV2BuildsParams struct {
+	Cursor *string                  `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int                     `form:"limit,omitempty" json:"limit,omitempty"`
+	Action *GetV2BuildsParamsAction `form:"action,omitempty" json:"action,omitempty"`
+	State  *string                  `form:"state,omitempty" json:"state,omitempty"`
+}
+
+// GetV2BuildsParamsAction defines parameters for GetV2Builds.
+type GetV2BuildsParamsAction string
+
+// PostV2BuildsJSONBody defines parameters for PostV2Builds.
+type PostV2BuildsJSONBody struct {
+	Action         PostV2BuildsJSONBodyAction `json:"action"`
+	BranchName     string                     `json:"branch_name"`
+	ChatId         *string                    `json:"chat_id,omitempty"`
+	InstallationId *string                    `json:"installation_id,omitempty"`
+	IsPublic       *bool                      `json:"is_public,omitempty"`
+	RepositoryUrl  string                     `json:"repository_url"`
+}
+
+// PostV2BuildsParams defines parameters for PostV2Builds.
+type PostV2BuildsParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// PostV2BuildsJSONBodyAction defines parameters for PostV2Builds.
+type PostV2BuildsJSONBodyAction string
+
+// PostV2EnvJSONBody defines parameters for PostV2Env.
+type PostV2EnvJSONBody struct {
+	Backend string  `json:"backend"`
+	ChatId  *string `json:"chat_id,omitempty"`
+}
+
+// PostV2EnvParams defines parameters for PostV2Env.
+type PostV2EnvParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// PostV2BuildsJSONRequestBody defines body for PostV2Builds for application/json ContentType.
+type PostV2BuildsJSONRequestBody PostV2BuildsJSONBody
+
+// PostV2EnvJSONRequestBody defines body for PostV2Env for application/json ContentType.
+type PostV2EnvJSONRequestBody PostV2EnvJSONBody
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -127,6 +203,37 @@ type ClientInterface interface {
 	// GetV2WellKnownOpenapiJson request
 	GetV2WellKnownOpenapiJson(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetV2Builds request
+	GetV2Builds(ctx context.Context, params *GetV2BuildsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostV2BuildsWithBody request with any body
+	PostV2BuildsWithBody(ctx context.Context, params *PostV2BuildsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PostV2Builds(ctx context.Context, params *PostV2BuildsParams, body PostV2BuildsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteV2BuildsBuildId request
+	DeleteV2BuildsBuildId(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetV2BuildsBuildId request
+	GetV2BuildsBuildId(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostV2BuildsBuildIdCancel request
+	PostV2BuildsBuildIdCancel(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteV2Env request
+	DeleteV2Env(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetV2Env request
+	GetV2Env(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostV2EnvWithBody request with any body
+	PostV2EnvWithBody(ctx context.Context, params *PostV2EnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PostV2Env(ctx context.Context, params *PostV2EnvParams, body PostV2EnvJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostV2EnvCancel request
+	PostV2EnvCancel(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetV2Me request
 	GetV2Me(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
@@ -145,6 +252,138 @@ func (c *Client) GetV2WellKnownCliMinVersion(ctx context.Context, reqEditors ...
 
 func (c *Client) GetV2WellKnownOpenapiJson(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetV2WellKnownOpenapiJsonRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetV2Builds(ctx context.Context, params *GetV2BuildsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetV2BuildsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostV2BuildsWithBody(ctx context.Context, params *PostV2BuildsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostV2BuildsRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostV2Builds(ctx context.Context, params *PostV2BuildsParams, body PostV2BuildsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostV2BuildsRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteV2BuildsBuildId(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteV2BuildsBuildIdRequest(c.Server, buildId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetV2BuildsBuildId(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetV2BuildsBuildIdRequest(c.Server, buildId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostV2BuildsBuildIdCancel(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostV2BuildsBuildIdCancelRequest(c.Server, buildId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteV2Env(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteV2EnvRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetV2Env(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetV2EnvRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostV2EnvWithBody(ctx context.Context, params *PostV2EnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostV2EnvRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostV2Env(ctx context.Context, params *PostV2EnvParams, body PostV2EnvJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostV2EnvRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostV2EnvCancel(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostV2EnvCancelRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +453,392 @@ func NewGetV2WellKnownOpenapiJsonRequest(server string) (*http.Request, error) {
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetV2BuildsRequest generates requests for GetV2Builds
+func NewGetV2BuildsRequest(server string, params *GetV2BuildsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v2/builds")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor", runtime.ParamLocationQuery, *params.Cursor); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Action != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "action", runtime.ParamLocationQuery, *params.Action); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.State != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "state", runtime.ParamLocationQuery, *params.State); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPostV2BuildsRequest calls the generic PostV2Builds builder with application/json body
+func NewPostV2BuildsRequest(server string, params *PostV2BuildsParams, body PostV2BuildsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostV2BuildsRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewPostV2BuildsRequestWithBody generates requests for PostV2Builds with any type of body
+func NewPostV2BuildsRequestWithBody(server string, params *PostV2BuildsParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v2/builds")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithLocation("simple", false, "Idempotency-Key", runtime.ParamLocationHeader, params.IdempotencyKey)
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewDeleteV2BuildsBuildIdRequest generates requests for DeleteV2BuildsBuildId
+func NewDeleteV2BuildsBuildIdRequest(server string, buildId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "build_id", runtime.ParamLocationPath, buildId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v2/builds/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetV2BuildsBuildIdRequest generates requests for GetV2BuildsBuildId
+func NewGetV2BuildsBuildIdRequest(server string, buildId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "build_id", runtime.ParamLocationPath, buildId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v2/builds/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPostV2BuildsBuildIdCancelRequest generates requests for PostV2BuildsBuildIdCancel
+func NewPostV2BuildsBuildIdCancelRequest(server string, buildId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "build_id", runtime.ParamLocationPath, buildId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v2/builds/%s:cancel", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDeleteV2EnvRequest generates requests for DeleteV2Env
+func NewDeleteV2EnvRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v2/env")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetV2EnvRequest generates requests for GetV2Env
+func NewGetV2EnvRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v2/env")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPostV2EnvRequest calls the generic PostV2Env builder with application/json body
+func NewPostV2EnvRequest(server string, params *PostV2EnvParams, body PostV2EnvJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostV2EnvRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewPostV2EnvRequestWithBody generates requests for PostV2Env with any type of body
+func NewPostV2EnvRequestWithBody(server string, params *PostV2EnvParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v2/env")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithLocation("simple", false, "Idempotency-Key", runtime.ParamLocationHeader, params.IdempotencyKey)
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewPostV2EnvCancelRequest generates requests for PostV2EnvCancel
+func NewPostV2EnvCancelRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v2/env:cancel")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -297,6 +922,37 @@ type ClientWithResponsesInterface interface {
 	// GetV2WellKnownOpenapiJsonWithResponse request
 	GetV2WellKnownOpenapiJsonWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetV2WellKnownOpenapiJsonResponse, error)
 
+	// GetV2BuildsWithResponse request
+	GetV2BuildsWithResponse(ctx context.Context, params *GetV2BuildsParams, reqEditors ...RequestEditorFn) (*GetV2BuildsResponse, error)
+
+	// PostV2BuildsWithBodyWithResponse request with any body
+	PostV2BuildsWithBodyWithResponse(ctx context.Context, params *PostV2BuildsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostV2BuildsResponse, error)
+
+	PostV2BuildsWithResponse(ctx context.Context, params *PostV2BuildsParams, body PostV2BuildsJSONRequestBody, reqEditors ...RequestEditorFn) (*PostV2BuildsResponse, error)
+
+	// DeleteV2BuildsBuildIdWithResponse request
+	DeleteV2BuildsBuildIdWithResponse(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*DeleteV2BuildsBuildIdResponse, error)
+
+	// GetV2BuildsBuildIdWithResponse request
+	GetV2BuildsBuildIdWithResponse(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*GetV2BuildsBuildIdResponse, error)
+
+	// PostV2BuildsBuildIdCancelWithResponse request
+	PostV2BuildsBuildIdCancelWithResponse(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*PostV2BuildsBuildIdCancelResponse, error)
+
+	// DeleteV2EnvWithResponse request
+	DeleteV2EnvWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*DeleteV2EnvResponse, error)
+
+	// GetV2EnvWithResponse request
+	GetV2EnvWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetV2EnvResponse, error)
+
+	// PostV2EnvWithBodyWithResponse request with any body
+	PostV2EnvWithBodyWithResponse(ctx context.Context, params *PostV2EnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostV2EnvResponse, error)
+
+	PostV2EnvWithResponse(ctx context.Context, params *PostV2EnvParams, body PostV2EnvJSONRequestBody, reqEditors ...RequestEditorFn) (*PostV2EnvResponse, error)
+
+	// PostV2EnvCancelWithResponse request
+	PostV2EnvCancelWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*PostV2EnvCancelResponse, error)
+
 	// GetV2MeWithResponse request
 	GetV2MeWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetV2MeResponse, error)
 }
@@ -346,6 +1002,235 @@ func (r GetV2WellKnownOpenapiJsonResponse) StatusCode() int {
 	return 0
 }
 
+type GetV2BuildsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Items      []Build `json:"items"`
+		NextCursor *string `json:"next_cursor"`
+	}
+	ApplicationproblemJSON409 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r GetV2BuildsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetV2BuildsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PostV2BuildsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *struct {
+		BuildId *string `json:"build_id,omitempty"`
+		State   *string `json:"state,omitempty"`
+	}
+	ApplicationproblemJSON403 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r PostV2BuildsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostV2BuildsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteV2BuildsBuildIdResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	ApplicationproblemJSON403 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteV2BuildsBuildIdResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteV2BuildsBuildIdResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetV2BuildsBuildIdResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *Build
+	ApplicationproblemJSON404 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r GetV2BuildsBuildIdResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetV2BuildsBuildIdResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PostV2BuildsBuildIdCancelResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	ApplicationproblemJSON403 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r PostV2BuildsBuildIdCancelResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostV2BuildsBuildIdCancelResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteV2EnvResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	ApplicationproblemJSON404 *Problem
+	ApplicationproblemJSON409 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteV2EnvResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteV2EnvResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetV2EnvResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		EnvId         *string `json:"env_id,omitempty"`
+		JobStatus     *string `json:"job_status,omitempty"`
+		JobStatusText *string `json:"job_status_text,omitempty"`
+		Namespace     *string `json:"namespace,omitempty"`
+		State         *string `json:"state,omitempty"`
+	}
+	ApplicationproblemJSON404 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r GetV2EnvResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetV2EnvResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PostV2EnvResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		EnvId     string `json:"env_id"`
+		Namespace string `json:"namespace"`
+		State     string `json:"state"`
+	}
+	JSON202 *struct {
+		EnvId     string `json:"env_id"`
+		Namespace string `json:"namespace"`
+		State     string `json:"state"`
+	}
+	ApplicationproblemJSON400 *Problem
+	ApplicationproblemJSON403 *Problem
+	ApplicationproblemJSON409 *Problem
+	ApplicationproblemJSON429 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r PostV2EnvResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostV2EnvResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PostV2EnvCancelResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	ApplicationproblemJSON404 *Problem
+	ApplicationproblemJSON409 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r PostV2EnvCancelResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostV2EnvCancelResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetV2MeResponse struct {
 	Body                      []byte
 	HTTPResponse              *http.Response
@@ -385,6 +1270,103 @@ func (c *ClientWithResponses) GetV2WellKnownOpenapiJsonWithResponse(ctx context.
 		return nil, err
 	}
 	return ParseGetV2WellKnownOpenapiJsonResponse(rsp)
+}
+
+// GetV2BuildsWithResponse request returning *GetV2BuildsResponse
+func (c *ClientWithResponses) GetV2BuildsWithResponse(ctx context.Context, params *GetV2BuildsParams, reqEditors ...RequestEditorFn) (*GetV2BuildsResponse, error) {
+	rsp, err := c.GetV2Builds(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetV2BuildsResponse(rsp)
+}
+
+// PostV2BuildsWithBodyWithResponse request with arbitrary body returning *PostV2BuildsResponse
+func (c *ClientWithResponses) PostV2BuildsWithBodyWithResponse(ctx context.Context, params *PostV2BuildsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostV2BuildsResponse, error) {
+	rsp, err := c.PostV2BuildsWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostV2BuildsResponse(rsp)
+}
+
+func (c *ClientWithResponses) PostV2BuildsWithResponse(ctx context.Context, params *PostV2BuildsParams, body PostV2BuildsJSONRequestBody, reqEditors ...RequestEditorFn) (*PostV2BuildsResponse, error) {
+	rsp, err := c.PostV2Builds(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostV2BuildsResponse(rsp)
+}
+
+// DeleteV2BuildsBuildIdWithResponse request returning *DeleteV2BuildsBuildIdResponse
+func (c *ClientWithResponses) DeleteV2BuildsBuildIdWithResponse(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*DeleteV2BuildsBuildIdResponse, error) {
+	rsp, err := c.DeleteV2BuildsBuildId(ctx, buildId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteV2BuildsBuildIdResponse(rsp)
+}
+
+// GetV2BuildsBuildIdWithResponse request returning *GetV2BuildsBuildIdResponse
+func (c *ClientWithResponses) GetV2BuildsBuildIdWithResponse(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*GetV2BuildsBuildIdResponse, error) {
+	rsp, err := c.GetV2BuildsBuildId(ctx, buildId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetV2BuildsBuildIdResponse(rsp)
+}
+
+// PostV2BuildsBuildIdCancelWithResponse request returning *PostV2BuildsBuildIdCancelResponse
+func (c *ClientWithResponses) PostV2BuildsBuildIdCancelWithResponse(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*PostV2BuildsBuildIdCancelResponse, error) {
+	rsp, err := c.PostV2BuildsBuildIdCancel(ctx, buildId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostV2BuildsBuildIdCancelResponse(rsp)
+}
+
+// DeleteV2EnvWithResponse request returning *DeleteV2EnvResponse
+func (c *ClientWithResponses) DeleteV2EnvWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*DeleteV2EnvResponse, error) {
+	rsp, err := c.DeleteV2Env(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteV2EnvResponse(rsp)
+}
+
+// GetV2EnvWithResponse request returning *GetV2EnvResponse
+func (c *ClientWithResponses) GetV2EnvWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetV2EnvResponse, error) {
+	rsp, err := c.GetV2Env(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetV2EnvResponse(rsp)
+}
+
+// PostV2EnvWithBodyWithResponse request with arbitrary body returning *PostV2EnvResponse
+func (c *ClientWithResponses) PostV2EnvWithBodyWithResponse(ctx context.Context, params *PostV2EnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostV2EnvResponse, error) {
+	rsp, err := c.PostV2EnvWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostV2EnvResponse(rsp)
+}
+
+func (c *ClientWithResponses) PostV2EnvWithResponse(ctx context.Context, params *PostV2EnvParams, body PostV2EnvJSONRequestBody, reqEditors ...RequestEditorFn) (*PostV2EnvResponse, error) {
+	rsp, err := c.PostV2Env(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostV2EnvResponse(rsp)
+}
+
+// PostV2EnvCancelWithResponse request returning *PostV2EnvCancelResponse
+func (c *ClientWithResponses) PostV2EnvCancelWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*PostV2EnvCancelResponse, error) {
+	rsp, err := c.PostV2EnvCancel(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostV2EnvCancelResponse(rsp)
 }
 
 // GetV2MeWithResponse request returning *GetV2MeResponse
@@ -435,6 +1417,337 @@ func ParseGetV2WellKnownOpenapiJsonResponse(rsp *http.Response) (*GetV2WellKnown
 	response := &GetV2WellKnownOpenapiJsonResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
+	}
+
+	return response, nil
+}
+
+// ParseGetV2BuildsResponse parses an HTTP response from a GetV2BuildsWithResponse call
+func ParseGetV2BuildsResponse(rsp *http.Response) (*GetV2BuildsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetV2BuildsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Items      []Build `json:"items"`
+			NextCursor *string `json:"next_cursor"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostV2BuildsResponse parses an HTTP response from a PostV2BuildsWithResponse call
+func ParsePostV2BuildsResponse(rsp *http.Response) (*PostV2BuildsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostV2BuildsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest struct {
+			BuildId *string `json:"build_id,omitempty"`
+			State   *string `json:"state,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteV2BuildsBuildIdResponse parses an HTTP response from a DeleteV2BuildsBuildIdWithResponse call
+func ParseDeleteV2BuildsBuildIdResponse(rsp *http.Response) (*DeleteV2BuildsBuildIdResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteV2BuildsBuildIdResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetV2BuildsBuildIdResponse parses an HTTP response from a GetV2BuildsBuildIdWithResponse call
+func ParseGetV2BuildsBuildIdResponse(rsp *http.Response) (*GetV2BuildsBuildIdResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetV2BuildsBuildIdResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Build
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostV2BuildsBuildIdCancelResponse parses an HTTP response from a PostV2BuildsBuildIdCancelWithResponse call
+func ParsePostV2BuildsBuildIdCancelResponse(rsp *http.Response) (*PostV2BuildsBuildIdCancelResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostV2BuildsBuildIdCancelResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteV2EnvResponse parses an HTTP response from a DeleteV2EnvWithResponse call
+func ParseDeleteV2EnvResponse(rsp *http.Response) (*DeleteV2EnvResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteV2EnvResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetV2EnvResponse parses an HTTP response from a GetV2EnvWithResponse call
+func ParseGetV2EnvResponse(rsp *http.Response) (*GetV2EnvResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetV2EnvResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			EnvId         *string `json:"env_id,omitempty"`
+			JobStatus     *string `json:"job_status,omitempty"`
+			JobStatusText *string `json:"job_status_text,omitempty"`
+			Namespace     *string `json:"namespace,omitempty"`
+			State         *string `json:"state,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostV2EnvResponse parses an HTTP response from a PostV2EnvWithResponse call
+func ParsePostV2EnvResponse(rsp *http.Response) (*PostV2EnvResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostV2EnvResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			EnvId     string `json:"env_id"`
+			Namespace string `json:"namespace"`
+			State     string `json:"state"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest struct {
+			EnvId     string `json:"env_id"`
+			Namespace string `json:"namespace"`
+			State     string `json:"state"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostV2EnvCancelResponse parses an HTTP response from a PostV2EnvCancelWithResponse call
+func ParsePostV2EnvCancelResponse(rsp *http.Response) (*PostV2EnvCancelResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostV2EnvCancelResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
 	}
 
 	return response, nil
