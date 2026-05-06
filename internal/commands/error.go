@@ -1,7 +1,10 @@
 package commands
 
 import (
+	"errors"
+
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/api"
+	"github.com/cyoda-platform/cyoda-cloud-cli/internal/auth"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/output"
 )
 
@@ -21,4 +24,36 @@ func problemToError(status int, problem *api.Problem) error {
 		return cerr
 	}
 	return nil
+}
+
+// errSessionExpired wraps the canonical "session expired" message at the
+// CodeUnauthenticated exit code (spec §6.6). Used for HTTP 401 paths and for
+// transport-level refresh-token expiry so the process exits with code 3
+// (unauthenticated) instead of the generic 1.
+func errSessionExpired() error {
+	return &output.CLIError{
+		Code: output.CodeUnauthenticated,
+		Err:  errors.New(`session expired. Run "cyoda-cloud login".`),
+	}
+}
+
+// mapTransportError wraps transport-level errors that signal session expiry
+// into *output.CLIError{CodeUnauthenticated}. Returns the input unchanged for
+// any other error or nil.
+//
+// Rationale: when an API call's refresh path fails with auth.ErrSessionExpired,
+// the request never produces an HTTP response — the error bubbles up from
+// http.Client.Do as a plain error. Without this helper, callers wrap with
+// fmt.Errorf and the typed sentinel is lost in the chain (errors.As recovers
+// it, but output.Exit only inspects *CLIError). Routing every transport-error
+// site through mapTransportError ensures refresh-token expiry maps to exit
+// code 3 (CodeUnauthenticated) rather than the generic 1 — see spec §6.6.
+func mapTransportError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, auth.ErrSessionExpired) {
+		return errSessionExpired()
+	}
+	return err
 }

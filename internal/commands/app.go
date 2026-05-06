@@ -153,13 +153,10 @@ func runAppBuildOrDeploy(cmd *cobra.Command, f appCommonFlags, a appBuildArgs, a
 		body,
 	)
 	if err != nil {
-		return fmt.Errorf("app %s: %w", action, err)
+		return mapTransportError(fmt.Errorf("app %s: %w", action, err))
 	}
 	if resp.StatusCode() == http.StatusUnauthorized {
-		return &output.CLIError{
-			Code: output.CodeUnauthenticated,
-			Err:  errors.New("session expired. Run \"cyoda-cloud login\"."),
-		}
+		return errSessionExpired()
 	}
 	if cerr := problemToError(resp.StatusCode(), resp.ApplicationproblemJSON403); cerr != nil {
 		return cerr
@@ -180,7 +177,7 @@ func runAppBuildOrDeploy(cmd *cobra.Command, f appCommonFlags, a appBuildArgs, a
 	}
 
 	if a.wait && snap.BuildId != "" {
-		if !output.IsTerminalAppState(snap.State) {
+		if !output.IsTerminalState(snap.State) {
 			final, err := waitForBuildTerminal(cmd, cli, snap.BuildId)
 			if err != nil {
 				return err
@@ -262,13 +259,10 @@ func runAppList(cmd *cobra.Command, f appCommonFlags, a appListArgs) error {
 
 	resp, err := cli.GetV2BuildsWithResponse(ctx, params)
 	if err != nil {
-		return fmt.Errorf("app list: %w", err)
+		return mapTransportError(fmt.Errorf("app list: %w", err))
 	}
 	if resp.StatusCode() == http.StatusUnauthorized {
-		return &output.CLIError{
-			Code: output.CodeUnauthenticated,
-			Err:  errors.New("session expired. Run \"cyoda-cloud login\"."),
-		}
+		return errSessionExpired()
 	}
 	if cerr := problemToError(resp.StatusCode(), resp.ApplicationproblemJSON409); cerr != nil {
 		return cerr
@@ -335,13 +329,10 @@ func runAppStatus(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 	cli := b.Client
 	resp, err := cli.GetV2BuildsBuildIdWithResponse(ctx, buildID)
 	if err != nil {
-		return fmt.Errorf("app status: %w", err)
+		return mapTransportError(fmt.Errorf("app status: %w", err))
 	}
 	if resp.StatusCode() == http.StatusUnauthorized {
-		return &output.CLIError{
-			Code: output.CodeUnauthenticated,
-			Err:  errors.New("session expired. Run \"cyoda-cloud login\"."),
-		}
+		return errSessionExpired()
 	}
 	if cerr := problemToError(resp.StatusCode(), resp.ApplicationproblemJSON404); cerr != nil {
 		return cerr
@@ -382,13 +373,10 @@ func runAppCancel(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 	cli := b.Client
 	resp, err := cli.PostV2BuildsBuildIdCancelWithResponse(ctx, buildID)
 	if err != nil {
-		return fmt.Errorf("app cancel: %w", err)
+		return mapTransportError(fmt.Errorf("app cancel: %w", err))
 	}
 	if resp.StatusCode() == http.StatusUnauthorized {
-		return &output.CLIError{
-			Code: output.CodeUnauthenticated,
-			Err:  errors.New("session expired. Run \"cyoda-cloud login\"."),
-		}
+		return errSessionExpired()
 	}
 	if resp.StatusCode() == http.StatusAccepted {
 		fmt.Fprintln(cmd.ErrOrStderr(), "build cancellation queued.")
@@ -429,13 +417,10 @@ func runAppDelete(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 	cli := b.Client
 	resp, err := cli.DeleteV2BuildsBuildIdWithResponse(ctx, buildID)
 	if err != nil {
-		return fmt.Errorf("app delete: %w", err)
+		return mapTransportError(fmt.Errorf("app delete: %w", err))
 	}
 	if resp.StatusCode() == http.StatusUnauthorized {
-		return &output.CLIError{
-			Code: output.CodeUnauthenticated,
-			Err:  errors.New("session expired. Run \"cyoda-cloud login\"."),
-		}
+		return errSessionExpired()
 	}
 	if resp.StatusCode() == http.StatusAccepted {
 		fmt.Fprintln(cmd.ErrOrStderr(), "build deletion queued.")
@@ -467,7 +452,7 @@ func waitForBuildTerminal(cmd *cobra.Command, cli *api.ClientWithResponses, buil
 			}
 			snap := buildToSnapshot(resp.JSON200)
 			last = &snap
-			return last.State, output.IsTerminalAppState(last.State), nil
+			return last.State, output.IsTerminalState(last.State), nil
 		},
 		withStatus(defaultWaitOpts(), cmd.ErrOrStderr()),
 	)

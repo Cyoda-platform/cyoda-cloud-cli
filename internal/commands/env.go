@@ -20,16 +20,6 @@ import (
 // rather than at the server.
 const minIdempotencyKeyLen = 16
 
-// errSessionExpired wraps the canonical "session expired" message at the
-// CodeUnauthenticated exit code (spec §6.6). Used for HTTP 401 paths so the
-// process exits with code 3 (unauthenticated) instead of the generic 1.
-func errSessionExpired() error {
-	return &output.CLIError{
-		Code: output.CodeUnauthenticated,
-		Err:  errors.New(`session expired. Run "cyoda-cloud login".`),
-	}
-}
-
 // newIdempotencyKey is a test seam — production calls uuid.NewString().
 var newIdempotencyKey = func() string { return uuid.NewString() }
 
@@ -138,7 +128,7 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 		body,
 	)
 	if err != nil {
-		return fmt.Errorf("env up: %w", err)
+		return mapTransportError(fmt.Errorf("env up: %w", err))
 	}
 	if resp.StatusCode() == http.StatusUnauthorized {
 		return errSessionExpired()
@@ -155,7 +145,7 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 		// Short-circuit when the initial response is already terminal — e.g.
 		// an idempotent replay returning 200 with state=SUCCESS. There's
 		// nothing to poll for and the user shouldn't see "still …" lines.
-		if !output.IsTerminalEnvState(snap.State) {
+		if !output.IsTerminalState(snap.State) {
 			final, err := waitForEnvTerminal(cmd, cli)
 			if err != nil {
 				return err
@@ -238,7 +228,7 @@ func runEnvStatus(cmd *cobra.Command, f envCommonFlags) error {
 	cli := b.Client
 	resp, err := cli.GetV2EnvWithResponse(ctx)
 	if err != nil {
-		return fmt.Errorf("env status: %w", err)
+		return mapTransportError(fmt.Errorf("env status: %w", err))
 	}
 	switch resp.StatusCode() {
 	case http.StatusUnauthorized:
@@ -300,7 +290,7 @@ func runEnvCancel(cmd *cobra.Command, f envCommonFlags) error {
 	cli := b.Client
 	resp, err := cli.PostV2EnvCancelWithResponse(ctx)
 	if err != nil {
-		return fmt.Errorf("env cancel: %w", err)
+		return mapTransportError(fmt.Errorf("env cancel: %w", err))
 	}
 	switch resp.StatusCode() {
 	case http.StatusAccepted:
@@ -356,7 +346,7 @@ func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 	cli := b.Client
 	resp, err := cli.DeleteV2EnvWithResponse(ctx)
 	if err != nil {
-		return fmt.Errorf("env down: %w", err)
+		return mapTransportError(fmt.Errorf("env down: %w", err))
 	}
 	switch resp.StatusCode() {
 	case http.StatusUnauthorized:
@@ -386,12 +376,12 @@ func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 	}
 
 	// Poll GET /v2/env until 404 (gone) or — in principle — a terminal env
-	// state. With IsTerminalEnvState narrowed to SUCCESS/FAILED/CANCELLED
+	// state. With IsTerminalState narrowed to SUCCESS/FAILED/CANCELLED
 	// (spec §4.3 vocabulary), the 404 path is the primary signal for
 	// teardown completion: the server typically transitions through
 	// non-terminal states like DELETING and then removes the resource.
 	// A future server version that emits an explicit terminal state on
-	// teardown will be picked up only when added to IsTerminalEnvState.
+	// teardown will be picked up only when added to IsTerminalState.
 	if _, err := waitForEnvTeardown(cmd, cli); err != nil {
 		return err
 	}
@@ -433,7 +423,7 @@ func waitForEnvTerminal(cmd *cobra.Command, cli *api.ClientWithResponses) (*outp
 				JobStatus:     derefString(resp.JSON200.JobStatus),
 				JobStatusText: derefString(resp.JSON200.JobStatusText),
 			}
-			return last.State, output.IsTerminalEnvState(last.State), nil
+			return last.State, output.IsTerminalState(last.State), nil
 		},
 		withStatus(defaultWaitOpts(), cmd.ErrOrStderr()),
 	)
@@ -474,7 +464,7 @@ func waitForEnvTeardown(cmd *cobra.Command, cli *api.ClientWithResponses) (*outp
 				JobStatus:     derefString(resp.JSON200.JobStatus),
 				JobStatusText: derefString(resp.JSON200.JobStatusText),
 			}
-			return last.State, output.IsTerminalEnvState(last.State), nil
+			return last.State, output.IsTerminalState(last.State), nil
 		},
 		withStatus(defaultWaitOpts(), cmd.ErrOrStderr()),
 	)

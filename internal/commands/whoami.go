@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -49,13 +48,10 @@ func runWhoami(cmd *cobra.Command, org string, asJSON bool) error {
 	}
 	resp, err := b.Client.GetV2MeWithResponse(ctx)
 	if err != nil {
-		return fmt.Errorf("whoami: %w", err)
+		return mapTransportError(fmt.Errorf("whoami: %w", err))
 	}
 	if resp.StatusCode() == http.StatusUnauthorized {
-		return &output.CLIError{
-			Code: output.CodeUnauthenticated,
-			Err:  errors.New("session expired. Run \"cyoda-cloud login\"."),
-		}
+		return errSessionExpired()
 	}
 	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
 		return fmt.Errorf("whoami: unexpected status %d", resp.StatusCode())

@@ -58,7 +58,7 @@ func runTokenPrint(cmd *cobra.Command, org string, show bool) error {
 	}
 	at, err := b.Cache.AccessToken(ctx)
 	if err != nil {
-		return fmt.Errorf("token print: %w", err)
+		return mapTransportError(fmt.Errorf("token print: %w", err))
 	}
 	// Per plan §Step 3: token goes to stderr (data-destination is stderr here
 	// because the value is sensitive and stdout streams are commonly logged
