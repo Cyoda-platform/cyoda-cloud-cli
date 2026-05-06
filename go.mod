@@ -3,10 +3,12 @@ module github.com/cyoda-platform/cyoda-cloud-cli
 go 1.22
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/google/uuid v1.6.0
 	github.com/oapi-codegen/runtime v1.1.2
 	github.com/spf13/cobra v1.8.1
 	github.com/zalando/go-keyring v0.2.5
+	golang.org/x/mod v0.18.0
 	golang.org/x/term v0.27.0
 )
 

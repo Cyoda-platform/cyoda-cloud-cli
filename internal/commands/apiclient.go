@@ -20,9 +20,10 @@ import (
 // authenticated api.ClientWithResponses ready to call /v2/* endpoints.
 //
 // The returned client has a TokenCache wired to refresh + persist rotated
-// refresh tokens back to the keychain via makePersistFn. The Discovery and
-// Profile are returned alongside so callers that need refresh-aware
-// operations (e.g. logout) can reuse the same snapshot without re-loading.
+// refresh tokens back to the keychain via makePersistFn. The TokenCache,
+// Discovery and Profile are returned alongside so callers that need
+// refresh-aware operations (e.g. logout, `token print`) can reuse the same
+// snapshot without re-loading.
 //
 // Errors:
 //   - discovery failures wrap "discovery: ...".
@@ -36,7 +37,7 @@ import (
 // (LoadDiscovery does not currently take a context; we accept ctx now for
 // forward compatibility and to keep the signature stable as Tasks 6/7 add
 // context-aware discovery.)
-func BuildAPIClient(ctx context.Context, org string) (*api.ClientWithResponses, config.Discovery, keychain.Profile, error) {
+func BuildAPIClient(ctx context.Context, org string) (*api.ClientWithResponses, *auth.TokenCache, config.Discovery, keychain.Profile, error) {
 	_ = ctx // reserved for future context-aware discovery; see godoc.
 
 	discoURL := config.DefaultDiscoveryURL
@@ -45,7 +46,7 @@ func BuildAPIClient(ctx context.Context, org string) (*api.ClientWithResponses, 
 	}
 	d, err := config.LoadDiscovery(discoURL, false)
 	if err != nil {
-		return nil, config.Discovery{}, keychain.Profile{}, fmt.Errorf("discovery: %w", err)
+		return nil, nil, config.Discovery{}, keychain.Profile{}, fmt.Errorf("discovery: %w", err)
 	}
 
 	profile, err := keychain.Load(org)
@@ -54,19 +55,19 @@ func BuildAPIClient(ctx context.Context, org string) (*api.ClientWithResponses, 
 			// Spec §6.6: "not logged in" maps to exit code 3 via the
 			// CLIError wrapper. main.go's run() translates this into the
 			// process exit code; cobra prints the wrapped message verbatim.
-			return nil, d, keychain.Profile{}, &output.CLIError{
+			return nil, nil, d, keychain.Profile{}, &output.CLIError{
 				Code: output.CodeUnauthenticated,
 				Err:  errors.New("not logged in. Run \"cyoda-cloud login\"."),
 			}
 		}
-		return nil, d, keychain.Profile{}, fmt.Errorf("keychain load: %w", err)
+		return nil, nil, d, keychain.Profile{}, fmt.Errorf("keychain load: %w", err)
 	}
 
-	cli, err := newAuthenticatedClient(profile, d)
+	cli, cache, err := newAuthenticatedClient(profile, d)
 	if err != nil {
-		return nil, d, profile, err
+		return nil, nil, d, profile, err
 	}
-	return cli, d, profile, nil
+	return cli, cache, d, profile, nil
 }
 
 // newAuthenticatedClient wires together the TokenCache, auth-injecting
@@ -75,7 +76,7 @@ func BuildAPIClient(ctx context.Context, org string) (*api.ClientWithResponses, 
 // The cache's PersistFunc (built via makePersistFn) writes the rotated
 // profile back to the keychain so a refresh-token rotation survives across
 // invocations.
-func newAuthenticatedClient(profile keychain.Profile, d config.Discovery) (*api.ClientWithResponses, error) {
+func newAuthenticatedClient(profile keychain.Profile, d config.Discovery) (*api.ClientWithResponses, *auth.TokenCache, error) {
 	cache := auth.NewTokenCache(
 		auth.Tokens{RefreshToken: profile.RefreshToken},
 		func(ctx context.Context, rt string) (auth.Tokens, error) {
@@ -93,7 +94,11 @@ func newAuthenticatedClient(profile keychain.Profile, d config.Discovery) (*api.
 		UserAgent:  version.UserAgent(version.Version, runtime.GOOS, runtime.GOARCH),
 	}
 	httpClient := &http.Client{Transport: tr}
-	return api.NewClientWithResponses(d.APIURL, api.WithHTTPClient(httpClient))
+	cli, err := api.NewClientWithResponses(d.APIURL, api.WithHTTPClient(httpClient))
+	if err != nil {
+		return nil, nil, err
+	}
+	return cli, cache, nil
 }
 
 // makePersistFn returns an auth.PersistFunc that, on each successful refresh,

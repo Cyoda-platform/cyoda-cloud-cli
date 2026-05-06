@@ -121,7 +121,7 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 	}
 
 	ctx := cmd.Context()
-	cli, _, _, err := BuildAPIClient(ctx, f.org)
+	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func newEnvStatusCmd() *cobra.Command {
 
 func runEnvStatus(cmd *cobra.Command, f envCommonFlags) error {
 	ctx := cmd.Context()
-	cli, _, _, err := BuildAPIClient(ctx, f.org)
+	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func newEnvCancelCmd() *cobra.Command {
 
 func runEnvCancel(cmd *cobra.Command, f envCommonFlags) error {
 	ctx := cmd.Context()
-	cli, _, _, err := BuildAPIClient(ctx, f.org)
+	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
@@ -339,7 +339,7 @@ func newEnvDownCmd() *cobra.Command {
 
 func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 	ctx := cmd.Context()
-	cli, _, _, err := BuildAPIClient(ctx, f.org)
+	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
