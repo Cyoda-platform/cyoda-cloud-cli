@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +11,12 @@ import (
 )
 
 func TestFetchDiscovery(t *testing.T) {
+	// httptest.NewServer serves http://; FetchDiscovery refuses cleartext by
+	// default. Production paths use https:// or file:// — set the dev escape
+	// hatch so this test can drive the HTTP code path without standing up
+	// TLS infrastructure.
+	t.Setenv(EnvInsecureDiscovery, "1")
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/cyoda-cloud-cli.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -31,6 +36,82 @@ func TestFetchDiscovery(t *testing.T) {
 	}
 	if got.APIURL != "https://api.cyoda.cloud" || got.Auth0ClientID != "native-client-id" {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+// TestFetchDiscovery_RefusesHTTP guards F-001: an http:// discovery URL must
+// be rejected unless the user has explicitly opted into the dev escape hatch.
+func TestFetchDiscovery_RefusesHTTP(t *testing.T) {
+	// Belt-and-braces: ensure the escape hatch isn't inherited from the
+	// surrounding environment.
+	t.Setenv(EnvInsecureDiscovery, "")
+
+	_, err := FetchDiscovery("http://example.invalid/.well-known/cyoda-cloud-cli.json")
+	if err == nil {
+		t.Fatal("expected error for http:// discovery URL, got nil")
+	}
+	if !strings.Contains(err.Error(), "refusing cleartext") {
+		t.Errorf("error %q does not mention 'refusing cleartext'", err)
+	}
+}
+
+// TestFetchDiscovery_AllowsHTTPWithEscapeHatch verifies the dev override.
+func TestFetchDiscovery_AllowsHTTPWithEscapeHatch(t *testing.T) {
+	t.Setenv(EnvInsecureDiscovery, "1")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/cyoda-cloud-cli.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"api_url":"https://api.cyoda.cloud",
+			"auth0_domain":"tenant.eu.auth0.com",
+			"auth0_client_id":"native-client-id",
+			"auth0_audience":"https://api.cyoda.cloud"
+		}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	got, err := FetchDiscovery(srv.URL + "/.well-known/cyoda-cloud-cli.json")
+	if err != nil {
+		t.Fatalf("expected http:// to succeed under escape hatch, got: %v", err)
+	}
+	if got.APIURL != "https://api.cyoda.cloud" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+// TestFetchDiscovery_RejectsUnsupportedScheme covers the default arm of the
+// scheme switch — neither https/file/http is allowed for, e.g., ftp:// or
+// data:// URLs. Without an explicit reject these would have flowed into
+// fetchDiscoveryHTTP and produced a confusing error.
+func TestFetchDiscovery_RejectsUnsupportedScheme(t *testing.T) {
+	_, err := FetchDiscovery("ftp://example.invalid/disco.json")
+	if err == nil {
+		t.Fatal("expected error for ftp:// scheme, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported URL scheme") {
+		t.Errorf("error %q does not mention unsupported scheme", err)
+	}
+}
+
+// TestDecodeDiscovery_RejectsPlaceholders guards F-011: the static discovery
+// JSON in the source tree carries REPLACE_WITH_* sentinels until provisioned.
+// If those sentinels ever survive into a published file we must fail rather
+// than silently point the CLI at a non-existent client_id.
+func TestDecodeDiscovery_RejectsPlaceholders(t *testing.T) {
+	body := `{
+		"api_url":"https://api.cyoda.cloud",
+		"auth0_domain":"tenant.eu.auth0.com",
+		"auth0_client_id":"REPLACE_WITH_NATIVE_APP_CLIENT_ID",
+		"auth0_audience":"https://api.cyoda.cloud"
+	}`
+	_, err := decodeDiscovery(strings.NewReader(body))
+	if err == nil {
+		t.Fatal("expected error for placeholder value, got nil")
+	}
+	if !strings.Contains(err.Error(), "placeholder value detected for auth0_client_id") {
+		t.Errorf("error %q does not name the placeholder field", err)
 	}
 }
 
@@ -146,14 +227,15 @@ func TestResolveDiscoveryURL_MalformedConfigWarns(t *testing.T) {
 		t.Fatalf("write malformed config: %v", err)
 	}
 
-	// Capture warnings via the test seam — a real stderr capture would be
-	// brittle on parallel tests and rely on global state.
+	// Re-arm the warn-once sentinel and route warnings into a buffer via the
+	// shared test seams in file.go.
+	ResetLoadFileWarnOnceForTest()
 	var captured strings.Builder
-	prev := resolveDiscoveryWarn
-	resolveDiscoveryWarn = func(format string, a ...any) {
-		fmt.Fprintf(&captured, format, a...)
-	}
-	t.Cleanup(func() { resolveDiscoveryWarn = prev })
+	SetLoadFileWarnSinkForTest(&captured)
+	t.Cleanup(func() {
+		SetLoadFileWarnSinkForTest(nil)
+		ResetLoadFileWarnOnceForTest()
+	})
 
 	got := ResolveDiscoveryURL()
 	if got != DefaultDiscoveryURL {
@@ -211,6 +293,9 @@ func TestLoadDiscoveryFileSchemeBypassesCache(t *testing.T) {
 func TestLoadDiscoveryForceBypassesFreshCache(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpHome)
+	// httptest.NewServer is http://; opt into the dev escape hatch so the
+	// cleartext guard added for F-001 doesn't preclude this cache test.
+	t.Setenv(EnvInsecureDiscovery, "1")
 
 	var hits atomic.Int32
 	mux := http.NewServeMux()

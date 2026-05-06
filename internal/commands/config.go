@@ -167,10 +167,10 @@ func validateConfigValue(key, value string) error {
 		return nil
 	case configKeyDiscoveryURL:
 		u, err := url.Parse(value)
-		if err != nil || u.Scheme == "" || (u.Scheme != "https" && u.Scheme != "http" && u.Scheme != "file") {
+		if err != nil || u.Scheme == "" || (u.Scheme != "https" && u.Scheme != "file") {
 			return &output.CLIError{
 				Code: output.CodeBadUsage,
-				Err:  fmt.Errorf("discovery_url must be a https://, http:// or file:// URL, got %q", value),
+				Err:  fmt.Errorf("discovery_url must be a https:// or file:// URL, got %q", value),
 			}
 		}
 		return nil

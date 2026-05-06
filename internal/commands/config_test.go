@@ -149,10 +149,28 @@ func TestConfig_SetInvalidDiscoveryURL(t *testing.T) {
 	}
 }
 
+// TestConfigSet_RefusesHTTPDiscoveryURL guards F-001 at the config-set
+// surface: a user must not be able to pin discovery_url to a cleartext URL
+// via `cyoda-cloud config set`. The runtime FetchDiscovery has its own guard
+// (with a dev escape hatch); the persisted config never carries http://.
+func TestConfigSet_RefusesHTTPDiscoveryURL(t *testing.T) {
+	withXDG(t)
+	_, _, err := runConfig(t, "set", "discovery_url", "http://example.com/disco.json")
+	if err == nil {
+		t.Fatal("expected error for http:// discovery_url, got nil")
+	}
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != output.CodeBadUsage {
+		t.Fatalf("err = %v, want CLIError{BadUsage}", err)
+	}
+	if !strings.Contains(err.Error(), "https:// or file:// URL") {
+		t.Errorf("error should name the allowed schemes, got: %v", err)
+	}
+}
+
 func TestConfig_SetValidDiscoveryURLs(t *testing.T) {
 	cases := []string{
 		"https://example.com/disco.json",
-		"http://localhost:8080/disco.json",
 		"file:///tmp/disco.json",
 	}
 	for _, v := range cases {

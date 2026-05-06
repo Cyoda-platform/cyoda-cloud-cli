@@ -39,22 +39,16 @@ const EnvDiscoveryURL = "CYODA_CLOUD_DISCOVERY_URL"
 // A LoadFile failure is non-fatal — the env var path and the hard-coded
 // default still work even when the user's config TOML is malformed, and
 // discovery resolution shouldn't fail the command for an orthogonal
-// config-file problem. We DO emit a one-line warning to stderr so the user
-// knows the config was ignored: a silently-skipped malformed file could
-// otherwise mask a wrong API target without any feedback. The warning is
-// also printed verbatim by `cyoda-cloud config get/set/list`, which call
-// LoadFile directly and return the error.
-var resolveDiscoveryWarn = func(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, format, a...)
-}
-
+// config-file problem. LoadFileWithWarn emits a single warning per process
+// to stderr so the user knows the config was ignored: a silently-skipped
+// malformed file could otherwise mask a wrong API target without any
+// feedback.
 func ResolveDiscoveryURL() string {
 	if v := os.Getenv(EnvDiscoveryURL); v != "" {
 		return v
 	}
-	f, err := LoadFile()
+	f, err := LoadFileWithWarn(nil)
 	if err != nil {
-		resolveDiscoveryWarn("warning: %s unreadable: %v\n", ConfigFilePath(), err)
 		return DefaultDiscoveryURL
 	}
 	if f.DiscoveryURL != "" {
@@ -74,18 +68,37 @@ const maxDiscoveryBody = 64 * 1024
 // need to layer on a context.WithTimeout.
 var discoveryClient = &http.Client{Timeout: 10 * time.Second}
 
+// EnvInsecureDiscovery, when set to "1", relaxes the scheme guard on
+// FetchDiscovery so http:// URLs are accepted. This is a development escape
+// hatch for ad-hoc local testing against an unencrypted mock; production code
+// paths must use https:// or file://. Documented in the error message
+// returned for cleartext URLs.
+const EnvInsecureDiscovery = "CYODA_CLOUD_INSECURE_DISCOVERY"
+
 // FetchDiscovery retrieves and decodes the discovery document at the given URL.
-// Supports https:// (and http:// for tests) plus a file:// scheme for local
-// development.
+// Only https:// and file:// schemes are accepted; http:// is rejected unless
+// the EnvInsecureDiscovery escape hatch is set (development only). The
+// escape hatch exists because the discovery document is the root-of-trust for
+// the auth and API endpoints — accepting cleartext silently would let a
+// passive attacker swap the Auth0 tenant out from under the user.
 func FetchDiscovery(rawURL string) (Discovery, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return Discovery{}, fmt.Errorf("discovery: parse url: %w", err)
+		return Discovery{}, fmt.Errorf("discovery: invalid URL: %w", err)
 	}
-	if u.Scheme == "file" {
+	switch u.Scheme {
+	case "https":
+		return fetchDiscoveryHTTP(rawURL)
+	case "file":
 		return fetchDiscoveryFile(u)
+	case "http":
+		if os.Getenv(EnvInsecureDiscovery) == "1" {
+			return fetchDiscoveryHTTP(rawURL)
+		}
+		return Discovery{}, fmt.Errorf("discovery: refusing cleartext http:// (use https:// or file://); set %s=1 to override for development", EnvInsecureDiscovery)
+	default:
+		return Discovery{}, fmt.Errorf("discovery: unsupported URL scheme %q", u.Scheme)
 	}
-	return fetchDiscoveryHTTP(rawURL)
 }
 
 func fetchDiscoveryHTTP(rawURL string) (Discovery, error) {
@@ -139,6 +152,12 @@ func fetchDiscoveryFile(u *url.URL) (Discovery, error) {
 	return decodeDiscovery(f)
 }
 
+// placeholderPrefix marks unprovisioned values in the static discovery JSON
+// that ships with the source tree (see deploy/cyoda-cloud-cli.json). If the
+// placeholder ever survives into a published file, fail loud rather than
+// pointing the CLI at "REPLACE_WITH_NATIVE_APP_CLIENT_ID".
+const placeholderPrefix = "REPLACE_WITH_"
+
 func decodeDiscovery(r io.Reader) (Discovery, error) {
 	var d Discovery
 	if err := json.NewDecoder(r).Decode(&d); err != nil {
@@ -146,6 +165,18 @@ func decodeDiscovery(r io.Reader) (Discovery, error) {
 	}
 	if d.APIURL == "" || d.Auth0ClientID == "" || d.Auth0Domain == "" || d.Auth0Audience == "" {
 		return Discovery{}, fmt.Errorf("discovery: incomplete response")
+	}
+	for _, fv := range []struct {
+		name, value string
+	}{
+		{"api_url", d.APIURL},
+		{"auth0_domain", d.Auth0Domain},
+		{"auth0_client_id", d.Auth0ClientID},
+		{"auth0_audience", d.Auth0Audience},
+	} {
+		if strings.HasPrefix(fv.value, placeholderPrefix) {
+			return Discovery{}, fmt.Errorf("discovery: placeholder value detected for %s; the discovery file has not been provisioned", fv.name)
+		}
 	}
 	return d, nil
 }
