@@ -180,6 +180,84 @@ func TestWhoami_HappyPathJSON(t *testing.T) {
 	}
 }
 
+// TestWhoami_RefreshTokenExpiredMapsExitThree is the regression test for the
+// final-review Critical #1 finding: when the stored RT is rejected by Auth0
+// with invalid_grant, the refresh path returns auth.ErrSessionExpired. That
+// error bubbles up from api.Transport.do as a transport-level error — the
+// API request never completes, so callers never see an HTTP 401. Before the
+// mapTransportError fix, the error was wrapped by fmt.Errorf("whoami: %w",
+// err) and output.Exit fell through to CodeGeneric (1). Spec §6.6 mandates
+// exit 3 (CodeUnauthenticated) so shell wrappers can branch on it to trigger
+// `cyoda-cloud login`. This test asserts the *output.CLIError surfaces with
+// the right code AND that output.Exit returns 3.
+func TestWhoami_RefreshTokenExpiredMapsExitThree(t *testing.T) {
+	setupFileFallback(t)
+
+	// API server: any /v2/me hit would mean the refresh succeeded — the
+	// scenario we're testing has the request fail BEFORE reaching the API.
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("API server must not be hit when refresh fails: %s %s", r.Method, r.URL.Path)
+		http.Error(w, "should not be reached", http.StatusInternalServerError)
+	}))
+	defer apiSrv.Close()
+	stubDiscoveryFile(t, apiSrv.URL)
+
+	// Auth0 /oauth/token returns 400 invalid_grant — the canonical RT-expired
+	// shape per Auth0 docs. The Refresh code recognises this and wraps with
+	// auth.ErrSessionExpired.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":             "invalid_grant",
+			"error_description": "Unknown or invalid refresh token",
+		})
+	})
+	auth0 := httptest.NewServer(mux)
+	defer auth0.Close()
+	restoreAuth0 := auth.SetAuthBaseURLForTest(auth0.URL)
+	defer restoreAuth0()
+
+	if err := keychain.Store(keychain.Profile{
+		Org:           "",
+		RefreshToken:  "RT-stale",
+		APIURL:        apiSrv.URL,
+		Auth0Domain:   "ignored.example",
+		Auth0ClientID: "client-id",
+		Auth0Audience: "https://api.cyoda.cloud",
+	}); err != nil {
+		t.Fatalf("seed keychain: %v", err)
+	}
+
+	cmd := NewWhoamiCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected refresh failure to produce error, got nil")
+	}
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err should be *output.CLIError (got %T): %v", err, err)
+	}
+	if cerr.Code != output.CodeUnauthenticated {
+		t.Errorf("CLIError.Code = %d, want %d (Unauthenticated)",
+			cerr.Code, output.CodeUnauthenticated)
+	}
+	if got := output.Exit(err); got != 3 {
+		t.Errorf("output.Exit = %d, want 3 (CodeUnauthenticated)", got)
+	}
+	if !strings.Contains(err.Error(), "session expired") {
+		t.Errorf("err message missing session-expired prompt: %v", err)
+	}
+}
+
 // TestWhoami_DefaultOrgFromConfig verifies that with default_org="abc" in
 // config.toml and no --org flag, the resolved org reaches BuildAPIClient
 // (and therefore keychain.Load). We seed the keychain only under "abc" — if
