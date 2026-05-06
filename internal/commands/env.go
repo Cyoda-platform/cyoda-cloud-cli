@@ -121,10 +121,11 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 	}
 
 	ctx := cmd.Context()
-	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
+	cli := b.Client
 
 	body := api.PostV2EnvJSONRequestBody{Backend: a.backend}
 	if a.chatID != "" {
@@ -226,10 +227,11 @@ func newEnvStatusCmd() *cobra.Command {
 
 func runEnvStatus(cmd *cobra.Command, f envCommonFlags) error {
 	ctx := cmd.Context()
-	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
+	cli := b.Client
 	resp, err := cli.GetV2EnvWithResponse(ctx)
 	if err != nil {
 		return fmt.Errorf("env status: %w", err)
@@ -286,10 +288,11 @@ func newEnvCancelCmd() *cobra.Command {
 
 func runEnvCancel(cmd *cobra.Command, f envCommonFlags) error {
 	ctx := cmd.Context()
-	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
+	cli := b.Client
 	resp, err := cli.PostV2EnvCancelWithResponse(ctx)
 	if err != nil {
 		return fmt.Errorf("env cancel: %w", err)
@@ -339,10 +342,11 @@ func newEnvDownCmd() *cobra.Command {
 
 func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 	ctx := cmd.Context()
-	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
+	cli := b.Client
 	resp, err := cli.DeleteV2EnvWithResponse(ctx)
 	if err != nil {
 		return fmt.Errorf("env down: %w", err)

@@ -16,14 +16,32 @@ import (
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/version"
 )
 
+// APIBuild bundles the dependencies a command needs to call the manager API.
+//
+// Most callers only need Client; commands that perform refresh-aware
+// operations (e.g. `token print`, logout flows) also use Cache, Discovery
+// and Profile — bundling them in a struct avoids the multi-return blank-
+// identifier smell at every callsite.
+//
+// Cache is non-nil only when an authenticated session was successfully
+// loaded; today every successful BuildAPIClient produces one, but the type
+// stays nilable so future "discovery only" callers don't have to fabricate
+// one.
+type APIBuild struct {
+	Client    *api.ClientWithResponses
+	Cache     *auth.TokenCache
+	Discovery config.Discovery
+	Profile   keychain.Profile
+}
+
 // BuildAPIClient resolves discovery + keychain profile and constructs an
 // authenticated api.ClientWithResponses ready to call /v2/* endpoints.
 //
-// The returned client has a TokenCache wired to refresh + persist rotated
-// refresh tokens back to the keychain via makePersistFn. The TokenCache,
-// Discovery and Profile are returned alongside so callers that need
-// refresh-aware operations (e.g. logout, `token print`) can reuse the same
-// snapshot without re-loading.
+// The returned APIBuild.Client has a TokenCache wired to refresh + persist
+// rotated refresh tokens back to the keychain via makePersistFn. The
+// TokenCache, Discovery and Profile are returned alongside so callers that
+// need refresh-aware operations (e.g. logout, `token print`) can reuse the
+// same snapshot without re-loading.
 //
 // Errors:
 //   - discovery failures wrap "discovery: ...".
@@ -37,7 +55,7 @@ import (
 // (LoadDiscovery does not currently take a context; we accept ctx now for
 // forward compatibility and to keep the signature stable as Tasks 6/7 add
 // context-aware discovery.)
-func BuildAPIClient(ctx context.Context, org string) (*api.ClientWithResponses, *auth.TokenCache, config.Discovery, keychain.Profile, error) {
+func BuildAPIClient(ctx context.Context, org string) (*APIBuild, error) {
 	_ = ctx // reserved for future context-aware discovery; see godoc.
 
 	discoURL := config.DefaultDiscoveryURL
@@ -46,7 +64,7 @@ func BuildAPIClient(ctx context.Context, org string) (*api.ClientWithResponses, 
 	}
 	d, err := config.LoadDiscovery(discoURL, false)
 	if err != nil {
-		return nil, nil, config.Discovery{}, keychain.Profile{}, fmt.Errorf("discovery: %w", err)
+		return nil, fmt.Errorf("discovery: %w", err)
 	}
 
 	profile, err := keychain.Load(org)
@@ -55,19 +73,24 @@ func BuildAPIClient(ctx context.Context, org string) (*api.ClientWithResponses, 
 			// Spec §6.6: "not logged in" maps to exit code 3 via the
 			// CLIError wrapper. main.go's run() translates this into the
 			// process exit code; cobra prints the wrapped message verbatim.
-			return nil, nil, d, keychain.Profile{}, &output.CLIError{
+			return nil, &output.CLIError{
 				Code: output.CodeUnauthenticated,
 				Err:  errors.New("not logged in. Run \"cyoda-cloud login\"."),
 			}
 		}
-		return nil, nil, d, keychain.Profile{}, fmt.Errorf("keychain load: %w", err)
+		return nil, fmt.Errorf("keychain load: %w", err)
 	}
 
 	cli, cache, err := newAuthenticatedClient(profile, d)
 	if err != nil {
-		return nil, nil, d, profile, err
+		return nil, err
 	}
-	return cli, cache, d, profile, nil
+	return &APIBuild{
+		Client:    cli,
+		Cache:     cache,
+		Discovery: d,
+		Profile:   profile,
+	}, nil
 }
 
 // newAuthenticatedClient wires together the TokenCache, auth-injecting

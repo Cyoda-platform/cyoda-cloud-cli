@@ -41,11 +41,11 @@ func NewWhoamiCmd() *cobra.Command {
 
 func runWhoami(cmd *cobra.Command, org string, asJSON bool) error {
 	ctx := cmd.Context()
-	cli, _, _, _, err := BuildAPIClient(ctx, org)
+	b, err := BuildAPIClient(ctx, org)
 	if err != nil {
 		return err
 	}
-	resp, err := cli.GetV2MeWithResponse(ctx)
+	resp, err := b.Client.GetV2MeWithResponse(ctx)
 	if err != nil {
 		return fmt.Errorf("whoami: %w", err)
 	}

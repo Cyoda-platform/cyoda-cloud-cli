@@ -124,10 +124,11 @@ func runAppBuildOrDeploy(cmd *cobra.Command, f appCommonFlags, a appBuildArgs, a
 	}
 
 	ctx := cmd.Context()
-	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
+	cli := b.Client
 
 	body := api.PostV2BuildsJSONRequestBody{
 		Action:        action,
@@ -234,10 +235,11 @@ func newAppListCmd() *cobra.Command {
 
 func runAppList(cmd *cobra.Command, f appCommonFlags, a appListArgs) error {
 	ctx := cmd.Context()
-	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
+	cli := b.Client
 
 	params := &api.GetV2BuildsParams{}
 	if a.limit > 0 {
@@ -320,10 +322,11 @@ func newAppStatusCmd() *cobra.Command {
 
 func runAppStatus(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 	ctx := cmd.Context()
-	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
+	cli := b.Client
 	resp, err := cli.GetV2BuildsBuildIdWithResponse(ctx, buildID)
 	if err != nil {
 		return fmt.Errorf("app status: %w", err)
@@ -365,10 +368,11 @@ func newAppCancelCmd() *cobra.Command {
 
 func runAppCancel(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 	ctx := cmd.Context()
-	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
+	cli := b.Client
 	resp, err := cli.PostV2BuildsBuildIdCancelWithResponse(ctx, buildID)
 	if err != nil {
 		return fmt.Errorf("app cancel: %w", err)
@@ -410,10 +414,11 @@ func newAppDeleteCmd() *cobra.Command {
 
 func runAppDelete(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 	ctx := cmd.Context()
-	cli, _, _, _, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
 		return err
 	}
+	cli := b.Client
 	resp, err := cli.DeleteV2BuildsBuildIdWithResponse(ctx, buildID)
 	if err != nil {
 		return fmt.Errorf("app delete: %w", err)

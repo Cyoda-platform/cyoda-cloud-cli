@@ -51,11 +51,11 @@ func runTokenPrint(cmd *cobra.Command, org string, show bool) error {
 		}
 	}
 	ctx := cmd.Context()
-	_, cache, _, _, err := BuildAPIClient(ctx, org)
+	b, err := BuildAPIClient(ctx, org)
 	if err != nil {
 		return err
 	}
-	at, err := cache.AccessToken(ctx)
+	at, err := b.Cache.AccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("token print: %w", err)
 	}
