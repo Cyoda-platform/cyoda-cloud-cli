@@ -20,6 +20,16 @@ import (
 // rather than at the server.
 const minIdempotencyKeyLen = 16
 
+// errSessionExpired wraps the canonical "session expired" message at the
+// CodeUnauthenticated exit code (spec §6.6). Used for HTTP 401 paths so the
+// process exits with code 3 (unauthenticated) instead of the generic 1.
+func errSessionExpired() error {
+	return &output.CLIError{
+		Code: output.CodeUnauthenticated,
+		Err:  errors.New(`session expired. Run "cyoda-cloud login".`),
+	}
+}
+
 // newIdempotencyKey is a test seam — production calls uuid.NewString().
 var newIdempotencyKey = func() string { return uuid.NewString() }
 
@@ -124,7 +134,7 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 		return fmt.Errorf("env up: %w", err)
 	}
 	if resp.StatusCode() == http.StatusUnauthorized {
-		return errors.New("session expired. Run \"cyoda-cloud login\".")
+		return errSessionExpired()
 	}
 	snap, err := envUpSnapshot(resp)
 	if err != nil {
@@ -200,7 +210,7 @@ func runEnvStatus(cmd *cobra.Command, f envCommonFlags) error {
 	}
 	switch resp.StatusCode() {
 	case http.StatusUnauthorized:
-		return errors.New("session expired. Run \"cyoda-cloud login\".")
+		return errSessionExpired()
 	case http.StatusNotFound:
 		// Per spec §6.6 a "not-found" maps to exit code 7 — that wiring lands
 		// in Task 7. For now: informational stderr message, exit zero.
@@ -252,7 +262,7 @@ func runEnvCancel(cmd *cobra.Command, f envCommonFlags) error {
 		fmt.Fprintln(cmd.ErrOrStderr(), "env cancellation queued.")
 		return nil
 	case http.StatusUnauthorized:
-		return errors.New("session expired. Run \"cyoda-cloud login\".")
+		return errSessionExpired()
 	}
 	if p := firstProblem(resp.ApplicationproblemJSON404, resp.ApplicationproblemJSON409); p != nil {
 		return fmt.Errorf("env cancel: %s (status %d)", p.Title, p.Status)
@@ -292,7 +302,7 @@ func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 	}
 	switch resp.StatusCode() {
 	case http.StatusUnauthorized:
-		return errors.New("session expired. Run \"cyoda-cloud login\".")
+		return errSessionExpired()
 	case http.StatusAccepted:
 		// Fallthrough to wait/render.
 	default:

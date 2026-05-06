@@ -160,3 +160,151 @@ func TestEnvTable_Nil(t *testing.T) {
 		t.Fatal("EnvTable(nil): expected error, got nil")
 	}
 }
+
+func TestBuildTable_RendersAllFields(t *testing.T) {
+	snap := &BuildSnapshot{
+		BuildId:       "bld_abc123",
+		Action:        "BUILD",
+		State:         "PROCESSING",
+		BranchName:    "main",
+		CreatedAt:     "2026-05-04T12:00:00Z",
+		JobStatus:     "RUNNING",
+		JobStatusText: "compiling user code",
+		PipelineName:  "pipeline-default",
+		ChatId:        "chat_xyz",
+	}
+	var buf bytes.Buffer
+	if err := BuildTable(&buf, snap); err != nil {
+		t.Fatalf("BuildTable: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"BUILD_ID", "bld_abc123",
+		"ACTION", "BUILD",
+		"STATE", "PROCESSING",
+		"BRANCH_NAME", "main",
+		"CREATED_AT", "2026-05-04T12:00:00Z",
+		"JOB_STATUS", "RUNNING",
+		"JOB_STATUS_TEXT", "compiling user code",
+		"PIPELINE_NAME", "pipeline-default",
+		"CHAT_ID", "chat_xyz",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("BuildTable output missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestBuildTable_OmitsEmptyOptionalFields(t *testing.T) {
+	snap := &BuildSnapshot{
+		BuildId: "bld_xyz",
+		Action:  "BUILD",
+		State:   "QUEUED",
+	}
+	var buf bytes.Buffer
+	if err := BuildTable(&buf, snap); err != nil {
+		t.Fatalf("BuildTable: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"BUILD_ID", "bld_xyz", "ACTION", "STATE", "QUEUED"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("BuildTable output missing required %q\n%s", want, out)
+		}
+	}
+	for _, omit := range []string{
+		"BRANCH_NAME", "CREATED_AT", "PIPELINE_NAME",
+		"JOB_STATUS", "JOB_STATUS_TEXT", "CHAT_ID",
+	} {
+		if strings.Contains(out, omit) {
+			t.Errorf("BuildTable should omit empty optional %q\n%s", omit, out)
+		}
+	}
+}
+
+func TestBuildTable_Nil(t *testing.T) {
+	var buf bytes.Buffer
+	if err := BuildTable(&buf, nil); err == nil {
+		t.Fatal("BuildTable(nil): expected error, got nil")
+	}
+	// And no output written on the nil path.
+	if buf.Len() != 0 {
+		t.Errorf("BuildTable(nil) wrote output: %q", buf.String())
+	}
+}
+
+func TestBuildListTable_RendersList(t *testing.T) {
+	bs := []BuildSnapshot{
+		{
+			BuildId:   "bld_1",
+			Action:    "BUILD",
+			State:     "SUCCESS",
+			CreatedAt: "2026-05-04T10:00:00Z",
+		},
+		{
+			BuildId:   "bld_2",
+			Action:    "DEPLOY",
+			State:     "PROCESSING",
+			CreatedAt: "2026-05-04T11:00:00Z",
+		},
+	}
+	var buf bytes.Buffer
+	if err := BuildListTable(&buf, bs); err != nil {
+		t.Fatalf("BuildListTable: %v", err)
+	}
+	out := buf.String()
+	// Column headers.
+	for _, want := range []string{"BUILD_ID", "ACTION", "STATE", "CREATED_AT"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("BuildListTable output missing header %q\n%s", want, out)
+		}
+	}
+	// Row values.
+	for _, want := range []string{
+		"bld_1", "BUILD", "SUCCESS", "2026-05-04T10:00:00Z",
+		"bld_2", "DEPLOY", "PROCESSING", "2026-05-04T11:00:00Z",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("BuildListTable output missing row value %q\n%s", want, out)
+		}
+	}
+}
+
+// TestBuildListTable_RendersCursor — the implementation does not surface the
+// cursor itself (it takes only []BuildSnapshot; per its doc the caller prints
+// any non-empty cursor to stderr). Confirm the helper doesn't accidentally
+// emit a cursor on its own and renders rows verbatim regardless.
+func TestBuildListTable_RendersCursor(t *testing.T) {
+	bs := []BuildSnapshot{
+		{BuildId: "bld_only", Action: "BUILD", State: "SUCCESS", CreatedAt: "2026-05-04T10:00:00Z"},
+	}
+	var buf bytes.Buffer
+	if err := BuildListTable(&buf, bs); err != nil {
+		t.Fatalf("BuildListTable: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "bld_only") {
+		t.Errorf("BuildListTable output missing row:\n%s", out)
+	}
+	// Helper must not invent a cursor row of its own — surface is rows + header only.
+	if strings.Contains(strings.ToLower(out), "cursor") {
+		t.Errorf("BuildListTable must not render cursor itself (caller's job):\n%s", out)
+	}
+}
+
+func TestBuildListTable_EmptyList(t *testing.T) {
+	var buf bytes.Buffer
+	if err := BuildListTable(&buf, nil); err != nil {
+		t.Fatalf("BuildListTable(nil): %v", err)
+	}
+	out := buf.String()
+	// Header still rendered so the user sees an obvious empty-state shape.
+	for _, want := range []string{"BUILD_ID", "ACTION", "STATE", "CREATED_AT"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("BuildListTable empty output missing header %q\n%s", want, out)
+		}
+	}
+	// No row data — only the header line.
+	if n := strings.Count(out, "\n"); n != 1 {
+		t.Errorf("BuildListTable empty output should have one line (header only), got %d:\n%s", n, out)
+	}
+}

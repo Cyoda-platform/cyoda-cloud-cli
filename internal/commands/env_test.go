@@ -217,6 +217,40 @@ func TestEnvUp_Wait_PollsUntilTerminal(t *testing.T) {
 	}
 }
 
+// TestEnvUp_SessionExpiredMapsToCLIError covers the 401 path on POST /v2/env.
+// Spec §6.6 mandates exit code 3 (unauthenticated); the legacy plain
+// errors.New(...) bubbled to exit code 1. The fix routes 401 through
+// errSessionExpired() so errors.As recovers a *output.CLIError carrying
+// CodeUnauthenticated.
+func TestEnvUp_SessionExpiredMapsToCLIError(t *testing.T) {
+	envTestSetup(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"type":   "about:blank",
+			"title":  "session expired",
+			"status": 401,
+		})
+	}))
+	cmd := NewEnvCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	_, _, err := runCmd(t, cmd, context.Background(), "up", "--backend", "x")
+	if err == nil {
+		t.Fatal("env up (401): expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "session expired") {
+		t.Errorf("err = %v, want session-expired message", err)
+	}
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err should be *output.CLIError, got %T: %v", err, err)
+	}
+	if cerr.Code != output.CodeUnauthenticated {
+		t.Errorf("CLIError.Code = %d, want %d (Unauthenticated)", cerr.Code, output.CodeUnauthenticated)
+	}
+}
+
 // ---- env status ----
 
 func TestEnvStatus_HappyPath(t *testing.T) {

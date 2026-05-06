@@ -183,3 +183,25 @@ func TestIsTerminalEnvState(t *testing.T) {
 		}
 	}
 }
+
+// TestIsTerminalAppState mirrors TestIsTerminalEnvState. The app helper is a
+// distinct function (so future divergence — e.g. an app-only TIMEOUT state —
+// doesn't require touching env code) but currently shares the same pinned
+// spec §4.3 vocabulary.
+func TestIsTerminalAppState(t *testing.T) {
+	terminals := []string{"SUCCESS", "FAILED", "CANCELLED"}
+	for _, s := range terminals {
+		if !IsTerminalAppState(s) {
+			t.Errorf("IsTerminalAppState(%q) = false, want true", s)
+		}
+	}
+	nonTerminals := []string{
+		"PROCESSING", "PENDING", "QUEUED", "", "success", "failed",
+		"READY", "ERROR", "DELETED", "TIMEOUT", "DEPLOYED",
+	}
+	for _, s := range nonTerminals {
+		if IsTerminalAppState(s) {
+			t.Errorf("IsTerminalAppState(%q) = true, want false", s)
+		}
+	}
+}
