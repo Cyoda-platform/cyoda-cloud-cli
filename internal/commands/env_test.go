@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -137,6 +138,14 @@ func TestEnvUp_RejectsShortIdempotencyKey(t *testing.T) {
 		"up", "--backend", "x", "--idempotency-key", "short")
 	if err == nil || !strings.Contains(err.Error(), "at least 16") {
 		t.Fatalf("err = %v, want minimum-length error", err)
+	}
+	// Spec §6.6: bad usage maps to exit code 2 via CLIError.
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err should be *output.CLIError, got %T: %v", err, err)
+	}
+	if cerr.Code != output.CodeBadUsage {
+		t.Errorf("CLIError.Code = %d, want %d (BadUsage)", cerr.Code, output.CodeBadUsage)
 	}
 }
 

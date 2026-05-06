@@ -12,6 +12,7 @@ import (
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/auth"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/config"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/keychain"
+	"github.com/cyoda-platform/cyoda-cloud-cli/internal/output"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/version"
 )
 
@@ -50,10 +51,13 @@ func BuildAPIClient(ctx context.Context, org string) (*api.ClientWithResponses, 
 	profile, err := keychain.Load(org)
 	if err != nil {
 		if errors.Is(err, keychain.ErrNotFound) {
-			// Task 7 will translate this to exit code 3 via an exitcode
-			// middleware. For now return a clear error so the user gets
-			// actionable text.
-			return nil, d, keychain.Profile{}, errors.New("not logged in. Run \"cyoda-cloud login\".")
+			// Spec §6.6: "not logged in" maps to exit code 3 via the
+			// CLIError wrapper. main.go's run() translates this into the
+			// process exit code; cobra prints the wrapped message verbatim.
+			return nil, d, keychain.Profile{}, &output.CLIError{
+				Code: output.CodeUnauthenticated,
+				Err:  errors.New("not logged in. Run \"cyoda-cloud login\"."),
+			}
 		}
 		return nil, d, keychain.Profile{}, fmt.Errorf("keychain load: %w", err)
 	}

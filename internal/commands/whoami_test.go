@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/api"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/auth"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/keychain"
+	"github.com/cyoda-platform/cyoda-cloud-cli/internal/output"
 )
 
 // stubDiscoveryFile writes a static discovery JSON to <tempdir>/disco.json
@@ -79,6 +81,16 @@ func TestWhoami_NoProfileReturnsClearError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cyoda-cloud login") {
 		t.Errorf("error should suggest login, got: %v", err)
+	}
+	// Spec §6.6: "not logged in" must surface as a CLIError with
+	// CodeUnauthenticated so main.go's wrapper sets exit code 3.
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err should be *output.CLIError, got %T: %v", err, err)
+	}
+	if cerr.Code != output.CodeUnauthenticated {
+		t.Errorf("CLIError.Code = %d, want %d (Unauthenticated)",
+			cerr.Code, output.CodeUnauthenticated)
 	}
 }
 

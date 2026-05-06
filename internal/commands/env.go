@@ -100,7 +100,10 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 	if key == "" {
 		key = newIdempotencyKey()
 	} else if len(key) < minIdempotencyKeyLen {
-		return fmt.Errorf("--idempotency-key must be at least %d characters", minIdempotencyKeyLen)
+		return &output.CLIError{
+			Code: output.CodeBadUsage,
+			Err:  fmt.Errorf("--idempotency-key must be at least %d characters", minIdempotencyKeyLen),
+		}
 	}
 
 	ctx := cmd.Context()
