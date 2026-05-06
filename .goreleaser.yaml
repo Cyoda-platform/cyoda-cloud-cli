@@ -1,0 +1,173 @@
+version: 2
+
+project_name: cyoda-cloud-cli
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: cyoda-cloud
+    main: ./cmd/cyoda-cloud
+    binary: cyoda-cloud
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/cyoda-platform/cyoda-cloud-cli/internal/version.Version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: cyoda-cloud
+    ids:
+      - cyoda-cloud
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - README.md
+
+brews:
+  - name: cyoda-cloud-cli
+    repository:
+      owner: cyoda-platform
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/cyoda-platform/cyoda-cloud-cli
+    description: "Cyoda Cloud command-line interface"
+    license: Apache-2.0
+    install: |
+      bin.install "cyoda-cloud"
+    skip_upload: auto
+
+scoops:
+  - repository:
+      owner: cyoda-platform
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/cyoda-platform/cyoda-cloud-cli
+    description: "Cyoda Cloud command-line interface"
+    license: Apache-2.0
+    skip_upload: auto
+
+nfpms:
+  - id: packages
+    package_name: cyoda-cloud-cli
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    homepage: https://github.com/cyoda-platform/cyoda-cloud-cli
+    description: "Cyoda Cloud command-line interface"
+    maintainer: "Cyoda Platform <support@cyoda.com>"
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+
+dockers:
+  - image_templates:
+      - "ghcr.io/cyoda-platform/cyoda-cloud-cli:{{ .Version }}-amd64"
+      - "ghcr.io/cyoda-platform/cyoda-cloud-cli:latest-amd64"
+    use: buildx
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.source=https://github.com/cyoda-platform/cyoda-cloud-cli"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+  - image_templates:
+      - "ghcr.io/cyoda-platform/cyoda-cloud-cli:{{ .Version }}-arm64"
+      - "ghcr.io/cyoda-platform/cyoda-cloud-cli:latest-arm64"
+    use: buildx
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.source=https://github.com/cyoda-platform/cyoda-cloud-cli"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+
+docker_manifests:
+  - name_template: "ghcr.io/cyoda-platform/cyoda-cloud-cli:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/cyoda-platform/cyoda-cloud-cli:{{ .Version }}-amd64"
+      - "ghcr.io/cyoda-platform/cyoda-cloud-cli:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/cyoda-platform/cyoda-cloud-cli:latest"
+    image_templates:
+      - "ghcr.io/cyoda-platform/cyoda-cloud-cli:latest-amd64"
+      - "ghcr.io/cyoda-platform/cyoda-cloud-cli:latest-arm64"
+
+# Sigstore keyless signing of all release artefacts (blob signatures).
+signs:
+  - id: cosign-blob
+    cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    artifacts: all
+
+# Sign Docker manifests via cosign keyless (Sigstore + GitHub OIDC).
+docker_signs:
+  - cmd: cosign
+    args:
+      - "sign"
+      - "--yes"
+      - "${artifact}"
+    artifacts: all
+
+# SBOMs via syft (SPDX-JSON), one per archive.
+sboms:
+  - id: spdx
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.spdx.sbom.json"
+    cmd: syft
+    args:
+      - "$artifact"
+      - "--output"
+      - "spdx-json={{ .ArtifactName }}.spdx.sbom.json"
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+release:
+  github:
+    owner: cyoda-platform
+    name: cyoda-cloud-cli
+  draft: false
+  prerelease: auto
+  mode: append
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"

@@ -1,0 +1,54 @@
+name: openapi-drift
+
+on:
+  schedule:
+    - cron: '0 6 * * *'      # 06:00 UTC daily
+  pull_request:
+    paths:
+      - 'api/openapi/**'
+      - 'internal/api/**'
+      - '.github/workflows/openapi-drift.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: openapi drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: true
+
+      - name: Fetch served OpenAPI
+        # The manager exposes the spec as JSON; we vendor YAML, so convert.
+        # Until the manager is reachable on the public DNS name, this step is
+        # tolerated as a no-op so main stays green. Once api.cyoda.cloud is
+        # live the curl succeeds and drift is detected by the diff step below.
+        run: |
+          set -euo pipefail
+          mkdir -p api/openapi
+          if curl -sSL --fail --max-time 30 \
+              -o /tmp/openapi.json \
+              https://api.cyoda.cloud/v2/.well-known/openapi.json ; then
+            # Convert JSON -> YAML using yq (preinstalled on ubuntu-latest).
+            yq -P '.' -oy /tmp/openapi.json > api/openapi/openapi.yaml
+          else
+            echo "::warning::manager not yet reachable; skipping fetch"
+          fi
+
+      - name: Regenerate client
+        run: go generate ./internal/api/...
+
+      - name: Verify no drift
+        run: |
+          set -euo pipefail
+          if ! git diff --exit-code -- api/openapi internal/api ; then
+            echo "::error::OpenAPI drift detected. Re-vendor the spec and regenerate the client locally, then commit."
+            exit 1
+          fi
