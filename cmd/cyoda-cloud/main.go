@@ -27,6 +27,7 @@ func main() {
 	root.AddCommand(commands.NewRegisterCmd())
 	root.AddCommand(commands.NewLogoutCmd())
 	root.AddCommand(commands.NewWhoamiCmd())
+	root.AddCommand(commands.NewEnvCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

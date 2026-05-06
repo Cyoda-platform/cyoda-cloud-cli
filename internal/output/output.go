@@ -32,6 +32,44 @@ func JSON(w io.Writer, v any) error {
 	return enc.Encode(v)
 }
 
+// EnvSnapshot is the unified-shape for env-table rendering. It abstracts over
+// the different generated response structs (POST returns required fields,
+// GET returns pointer fields) so callers don't have to special-case each.
+type EnvSnapshot struct {
+	EnvId         string
+	Namespace     string
+	State         string
+	JobStatus     string
+	JobStatusText string
+}
+
+// EnvTable renders an EnvSnapshot as a human-readable two-column table.
+// Empty optional fields (JobStatus, JobStatusText) are omitted so we don't
+// print blank rows for the POST-response shape.
+func EnvTable(w io.Writer, e *EnvSnapshot) error {
+	if e == nil {
+		return errors.New("output: EnvTable: nil EnvSnapshot")
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	rows := [][2]string{
+		{"ENV_ID", e.EnvId},
+		{"NAMESPACE", e.Namespace},
+		{"STATE", e.State},
+	}
+	if e.JobStatus != "" {
+		rows = append(rows, [2]string{"JOB_STATUS", e.JobStatus})
+	}
+	if e.JobStatusText != "" {
+		rows = append(rows, [2]string{"JOB_STATUS_TEXT", e.JobStatusText})
+	}
+	for _, r := range rows {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\n", r[0], r[1]); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
+}
+
 // MeTable renders an *api.Me as a three-section human-readable table:
 // identity, quota, features. Output is deterministic — features are sorted
 // alphabetically by key, slice fields are joined with ", ".

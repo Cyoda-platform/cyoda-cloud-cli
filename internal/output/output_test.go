@@ -111,3 +111,52 @@ func TestMeTable_Nil(t *testing.T) {
 		t.Fatal("MeTable(nil): expected error, got nil")
 	}
 }
+
+func TestEnvTable_RendersAllFields(t *testing.T) {
+	snap := &EnvSnapshot{
+		EnvId:         "env_abc",
+		Namespace:     "ns_org_acme",
+		State:         "PROCESSING",
+		JobStatus:     "RUNNING",
+		JobStatusText: "rolling out cassandra-basic",
+	}
+	var buf bytes.Buffer
+	if err := EnvTable(&buf, snap); err != nil {
+		t.Fatalf("EnvTable: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"ENV_ID", "env_abc",
+		"NAMESPACE", "ns_org_acme",
+		"STATE", "PROCESSING",
+		"JOB_STATUS", "RUNNING",
+		"JOB_STATUS_TEXT", "rolling out cassandra-basic",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("EnvTable output missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestEnvTable_OmitsEmptyOptionalFields(t *testing.T) {
+	snap := &EnvSnapshot{
+		EnvId:     "env_abc",
+		Namespace: "ns_x",
+		State:     "PROCESSING",
+	}
+	var buf bytes.Buffer
+	if err := EnvTable(&buf, snap); err != nil {
+		t.Fatalf("EnvTable: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "JOB_STATUS") {
+		t.Errorf("EnvTable should omit empty JOB_STATUS row:\n%s", out)
+	}
+}
+
+func TestEnvTable_Nil(t *testing.T) {
+	var buf bytes.Buffer
+	if err := EnvTable(&buf, nil); err == nil {
+		t.Fatal("EnvTable(nil): expected error, got nil")
+	}
+}
