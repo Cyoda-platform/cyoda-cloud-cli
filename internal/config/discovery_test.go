@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -126,6 +127,48 @@ func TestResolveDiscoveryURL_Precedence(t *testing.T) {
 			t.Errorf("ResolveDiscoveryURL = %q, want %q", got, want)
 		}
 	})
+}
+
+// TestResolveDiscoveryURL_MalformedConfigWarns covers the final-review Minor
+// #11 finding: a malformed config.toml previously caused ResolveDiscoveryURL
+// to silently fall back to the default — a user pointing config.discovery_url
+// at staging would, on the next config edit typo, hit production with no
+// feedback. The fix prints a one-line warning to stderr before falling back.
+func TestResolveDiscoveryURL_MalformedConfigWarns(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(EnvDiscoveryURL, "")
+
+	// Write a malformed TOML at ConfigFilePath().
+	if err := os.MkdirAll(filepath.Dir(ConfigFilePath()), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(ConfigFilePath(), []byte("default_org = \"acme\nunterminated"), 0o600); err != nil {
+		t.Fatalf("write malformed config: %v", err)
+	}
+
+	// Capture warnings via the test seam — a real stderr capture would be
+	// brittle on parallel tests and rely on global state.
+	var captured strings.Builder
+	prev := resolveDiscoveryWarn
+	resolveDiscoveryWarn = func(format string, a ...any) {
+		fmt.Fprintf(&captured, format, a...)
+	}
+	t.Cleanup(func() { resolveDiscoveryWarn = prev })
+
+	got := ResolveDiscoveryURL()
+	if got != DefaultDiscoveryURL {
+		t.Errorf("ResolveDiscoveryURL = %q, want default %q (malformed config should fall back)", got, DefaultDiscoveryURL)
+	}
+	w := captured.String()
+	if !strings.Contains(w, "warning:") {
+		t.Errorf("expected stderr warning, got: %q", w)
+	}
+	if !strings.Contains(w, "unreadable") {
+		t.Errorf("warning should mention 'unreadable', got: %q", w)
+	}
+	if !strings.Contains(w, ConfigFilePath()) {
+		t.Errorf("warning should include the config path, got: %q", w)
+	}
 }
 
 func TestLoadDiscoveryFileSchemeBypassesCache(t *testing.T) {

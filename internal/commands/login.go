@@ -2,7 +2,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -66,7 +65,7 @@ func runLogin(cmd *cobra.Command, opts loginOpts) error {
 	if err != nil {
 		return fmt.Errorf("discovery: %w", err)
 	}
-	ctx := context.Background()
+	ctx := cmd.Context()
 	loCfg := auth.LoopbackConfig{
 		Auth0Domain:  d.Auth0Domain,
 		ClientID:     d.Auth0ClientID,

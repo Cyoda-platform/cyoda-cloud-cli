@@ -35,12 +35,17 @@ func JSON(w io.Writer, v any) error {
 // EnvSnapshot is the unified-shape for env-table rendering. It abstracts over
 // the different generated response structs (POST returns required fields,
 // GET returns pointer fields) so callers don't have to special-case each.
+//
+// JSON tags mirror the OpenAPI snake_case names so --output-json round-trips
+// the API's own field naming (spec §6.5). Optional fields use ,omitempty so
+// the POST-response shape (which lacks job_status / job_status_text) does not
+// emit empty strings.
 type EnvSnapshot struct {
-	EnvId         string
-	Namespace     string
-	State         string
-	JobStatus     string
-	JobStatusText string
+	EnvId         string `json:"env_id"`
+	Namespace     string `json:"namespace"`
+	State         string `json:"state"`
+	JobStatus     string `json:"job_status,omitempty"`
+	JobStatusText string `json:"job_status_text,omitempty"`
 }
 
 // EnvTable renders an EnvSnapshot as a human-readable two-column table.
@@ -73,16 +78,23 @@ func EnvTable(w io.Writer, e *EnvSnapshot) error {
 // BuildSnapshot is the unified-shape for build-table rendering. It mirrors
 // the *api.Build fields the CLI surfaces; pointer-typed source fields are
 // flattened to plain strings so callers don't repeat nil-deref boilerplate.
+//
+// JSON tags mirror the OpenAPI Build schema's snake_case names. branch_name
+// is request-side (not on the Build response) but the snapshot carries it
+// through from the build/deploy command's --branch flag so the user sees it
+// in JSON output; the tag still uses snake_case for parity. Optional fields
+// use ,omitempty so the queued-only case (most fields empty) emits a compact
+// document.
 type BuildSnapshot struct {
-	BuildId       string
-	Action        string
-	State         string
-	BranchName    string
-	CreatedAt     string
-	JobStatus     string
-	JobStatusText string
-	PipelineName  string
-	ChatId        string
+	BuildId       string `json:"build_id"`
+	Action        string `json:"action,omitempty"`
+	State         string `json:"state"`
+	BranchName    string `json:"branch_name,omitempty"`
+	CreatedAt     string `json:"created_at,omitempty"`
+	JobStatus     string `json:"job_status,omitempty"`
+	JobStatusText string `json:"job_status_text,omitempty"`
+	PipelineName  string `json:"pipeline_name,omitempty"`
+	ChatId        string `json:"chat_id,omitempty"`
 }
 
 // BuildTable renders a single BuildSnapshot as a two-column key/value table.

@@ -164,35 +164,15 @@ func TestPollUntilTerminal_StatusMessages(t *testing.T) {
 	}
 }
 
-func TestIsTerminalEnvState(t *testing.T) {
+// TestIsTerminalState exercises the single shared terminal-state predicate.
+// Both env and app entities use the same spec §4.3 vocabulary
+// (SUCCESS/FAILED/CANCELLED); speculative vocabularies (READY/ERROR/DELETED/
+// TIMEOUT/DEPLOYED) are deliberately rejected. See IsTerminalState's doc.
+func TestIsTerminalState(t *testing.T) {
 	terminals := []string{"SUCCESS", "FAILED", "CANCELLED"}
 	for _, s := range terminals {
-		if !IsTerminalEnvState(s) {
-			t.Errorf("IsTerminalEnvState(%q) = false, want true", s)
-		}
-	}
-	// READY/ERROR/DELETED are not terminal — they're speculative server
-	// vocabulary not pinned in spec §4.3. See IsTerminalEnvState doc.
-	nonTerminals := []string{
-		"PROCESSING", "PENDING", "", "success", "failed",
-		"READY", "ERROR", "DELETED",
-	}
-	for _, s := range nonTerminals {
-		if IsTerminalEnvState(s) {
-			t.Errorf("IsTerminalEnvState(%q) = true, want false", s)
-		}
-	}
-}
-
-// TestIsTerminalAppState mirrors TestIsTerminalEnvState. The app helper is a
-// distinct function (so future divergence — e.g. an app-only TIMEOUT state —
-// doesn't require touching env code) but currently shares the same pinned
-// spec §4.3 vocabulary.
-func TestIsTerminalAppState(t *testing.T) {
-	terminals := []string{"SUCCESS", "FAILED", "CANCELLED"}
-	for _, s := range terminals {
-		if !IsTerminalAppState(s) {
-			t.Errorf("IsTerminalAppState(%q) = false, want true", s)
+		if !IsTerminalState(s) {
+			t.Errorf("IsTerminalState(%q) = false, want true", s)
 		}
 	}
 	nonTerminals := []string{
@@ -200,8 +180,8 @@ func TestIsTerminalAppState(t *testing.T) {
 		"READY", "ERROR", "DELETED", "TIMEOUT", "DEPLOYED",
 	}
 	for _, s := range nonTerminals {
-		if IsTerminalAppState(s) {
-			t.Errorf("IsTerminalAppState(%q) = true, want false", s)
+		if IsTerminalState(s) {
+			t.Errorf("IsTerminalState(%q) = true, want false", s)
 		}
 	}
 }

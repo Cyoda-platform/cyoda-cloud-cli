@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -37,16 +36,28 @@ const EnvDiscoveryURL = "CYODA_CLOUD_DISCOVERY_URL"
 // standard CLI precedence: env var (CYODA_CLOUD_DISCOVERY_URL) > config file
 // (discovery_url) > DefaultDiscoveryURL.
 //
-// A LoadFile failure is silently swallowed — the env var path and the
-// hard-coded default still work even when the user's config TOML is
-// malformed, and discovery resolution shouldn't fail the command for an
-// orthogonal config-file problem. (Malformed TOML is reported by
-// `cyoda-cloud config get/set/list` which call LoadFile directly.)
+// A LoadFile failure is non-fatal — the env var path and the hard-coded
+// default still work even when the user's config TOML is malformed, and
+// discovery resolution shouldn't fail the command for an orthogonal
+// config-file problem. We DO emit a one-line warning to stderr so the user
+// knows the config was ignored: a silently-skipped malformed file could
+// otherwise mask a wrong API target without any feedback. The warning is
+// also printed verbatim by `cyoda-cloud config get/set/list`, which call
+// LoadFile directly and return the error.
+var resolveDiscoveryWarn = func(format string, a ...any) {
+	fmt.Fprintf(os.Stderr, format, a...)
+}
+
 func ResolveDiscoveryURL() string {
 	if v := os.Getenv(EnvDiscoveryURL); v != "" {
 		return v
 	}
-	if f, err := LoadFile(); err == nil && f.DiscoveryURL != "" {
+	f, err := LoadFile()
+	if err != nil {
+		resolveDiscoveryWarn("warning: %s unreadable: %v\n", ConfigFilePath(), err)
+		return DefaultDiscoveryURL
+	}
+	if f.DiscoveryURL != "" {
 		return f.DiscoveryURL
 	}
 	return DefaultDiscoveryURL
@@ -85,11 +96,12 @@ func fetchDiscoveryHTTP(rawURL string) (Discovery, error) {
 		return Discovery{}, fmt.Errorf("discovery: build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", version.UserAgent(version.Version, runtime.GOOS, runtime.GOARCH))
-	// Mirror the headers commands/version.go's min-version fetch sets so the
-	// manager (and any HTTP middleware) sees a consistent identity for both
-	// the discovery and min-version endpoints.
-	req.Header.Set("Cyoda-Cloud-CLI-Version", version.Version)
+	// User-Agent + Cyoda-Cloud-CLI-Version are the CLI's standard identity
+	// headers (see version.SetStandardHeaders). Both this discovery client
+	// and the min-version fetcher in commands/version.go use the helper so
+	// the manager sees a consistent identity across the two non-API HTTP
+	// paths that bypass api.Transport.
+	version.SetStandardHeaders(req)
 
 	resp, err := discoveryClient.Do(req)
 	if err != nil {

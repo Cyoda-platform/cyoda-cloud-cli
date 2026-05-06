@@ -125,32 +125,19 @@ func PollUntilTerminal(ctx context.Context, fn PollFunc, opts WaitOpts) (string,
 	}
 }
 
-// IsTerminalEnvState reports whether s is a terminal state for env operations.
-// The vocabulary follows docs/spec.md §4.3 examples (SUCCESS, FAILED, CANCELLED).
-// Non-matching states are treated as non-terminal — the caller's poll loop will
-// either reach the 30 min total deadline or, for teardown, observe the 404 that
-// signals completion.
+// IsTerminalState reports whether s is a terminal state per spec §4.3
+// (SUCCESS, FAILED, CANCELLED). Both env and app entities share this
+// vocabulary. Non-matching states are non-terminal — the caller's poll loop
+// will either reach its total deadline or, for teardown, observe the 404
+// that signals completion.
 //
 // We deliberately avoid speculatively accepting other vocabularies (e.g.
-// READY/ERROR/DELETED). If the server emits something else we'll find out from
-// real usage and add it explicitly here. Speculative acceptance hides bugs.
-func IsTerminalEnvState(s string) bool {
-	switch s {
-	case "SUCCESS", "FAILED", "CANCELLED":
-		return true
-	}
-	return false
-}
-
-// IsTerminalAppState reports whether s is a terminal state for app build /
-// deploy operations. The vocabulary follows docs/spec.md §4.3 — the spec
-// uses the same terminal vocabulary for env and app entities. We keep the
-// helpers separate so future divergence (e.g. an app-only TIMEOUT state)
-// does not require touching env code.
-//
-// Mirrors IsTerminalEnvState's discipline: speculative states are not
-// accepted. If the server emits something else we'll add it explicitly.
-func IsTerminalAppState(s string) bool {
+// READY/ERROR/DELETED). If the server emits something else we'll find out
+// from real usage and add it explicitly here. Speculative acceptance hides
+// bugs. If a future divergence emerges (env adds DELETED, app keeps the
+// SUCCESS-set), the call site can pass its own predicate inline — no helper
+// needed for a one-line check.
+func IsTerminalState(s string) bool {
 	switch s {
 	case "SUCCESS", "FAILED", "CANCELLED":
 		return true

@@ -75,8 +75,6 @@ type APIBuild struct {
 // cobra command directly (rather than just a context.Context) avoids a
 // cascading signature change every time a new global flag is added.
 func BuildAPIClient(cmd *cobra.Command, org string) (*APIBuild, error) {
-	_ = cmd.Context() // reserved for future context-aware discovery; see godoc.
-
 	d, err := config.LoadDiscovery(config.ResolveDiscoveryURL(), shouldRefreshDiscovery(cmd))
 	if err != nil {
 		return nil, fmt.Errorf("discovery: %w", err)

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -19,7 +22,16 @@ func main() {
 // directly without invoking os.Exit. cobra prints the error to stderr on
 // SilenceErrors=false (default) — we let it do that and only translate the
 // returned error into an exit code via output.Exit.
+//
+// A signal-aware context is wired via signal.NotifyContext so SIGINT (Ctrl-C)
+// and SIGTERM cancel cmd.Context() across every subcommand. Long-running
+// flows — login (which blocks on the OAuth callback) and --wait polling — pick
+// this up automatically because they all read cmd.Context(). root.ExecuteContext
+// populates cmd.Context() for the whole tree.
 func run() int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	root := &cobra.Command{
 		Use:   "cyoda-cloud",
 		Short: "Cyoda Cloud command-line interface",
@@ -39,5 +51,5 @@ func run() int {
 	root.AddCommand(commands.NewAppCmd())
 	root.AddCommand(commands.NewConfigCmd())
 	root.AddCommand(commands.NewTokenCmd())
-	return output.Exit(root.Execute())
+	return output.Exit(root.ExecuteContext(ctx))
 }

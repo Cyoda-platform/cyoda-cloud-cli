@@ -230,8 +230,10 @@ func fetchMinVersion(ctx context.Context, apiBase string) (string, error) {
 		return "", fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", version.UserAgent(version.Version, runtime.GOOS, runtime.GOARCH))
-	req.Header.Set("Cyoda-Cloud-CLI-Version", version.Version)
+	// Standard identity headers; see version.SetStandardHeaders. Discovery
+	// uses the same helper so the manager sees a consistent identity for
+	// both non-API paths that bypass api.Transport.
+	version.SetStandardHeaders(req)
 
 	resp, err := minVersionClient.Do(req)
 	if err != nil {

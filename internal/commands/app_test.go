@@ -108,8 +108,8 @@ func TestAppBuild_PostsBuildAction(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("decode stdout: %v\nout=%s", err, stdout)
 	}
-	if got["BuildId"] != "b_123" {
-		t.Errorf("BuildId = %v", got["BuildId"])
+	if got["build_id"] != "b_123" {
+		t.Errorf("build_id = %v", got["build_id"])
 	}
 }
 
@@ -293,8 +293,8 @@ func TestAppStatus_PathParam(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got["BuildId"] != "b_xyz" {
-		t.Errorf("BuildId = %v", got["BuildId"])
+	if got["build_id"] != "b_xyz" {
+		t.Errorf("build_id = %v", got["build_id"])
 	}
 }
 
@@ -435,7 +435,7 @@ func TestAppBuild_WaitPollsUntilTerminal(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("decode: %v\nout=%s", err, stdout)
 	}
-	if got["State"] != "SUCCESS" {
-		t.Errorf("final state = %v, want SUCCESS", got["State"])
+	if got["state"] != "SUCCESS" {
+		t.Errorf("final state = %v, want SUCCESS", got["state"])
 	}
 }

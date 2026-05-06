@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
@@ -42,7 +41,7 @@ func runLogout(cmd *cobra.Command, org string) error {
 	// Best-effort revoke: failing the network call must not block the user
 	// from getting logged out locally. Per RFC 7009 §2.2 the endpoint is
 	// idempotent, so retries are also safe.
-	if err := auth.Revoke(context.Background(), profile.Auth0Domain, profile.Auth0ClientID, profile.RefreshToken); err != nil {
+	if err := auth.Revoke(cmd.Context(), profile.Auth0Domain, profile.Auth0ClientID, profile.RefreshToken); err != nil {
 		fmt.Fprintln(stderr, "warning: failed to revoke refresh token:", err)
 	}
 

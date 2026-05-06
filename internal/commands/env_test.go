@@ -106,11 +106,11 @@ func TestEnvUp_PostsBackendAndIdempotencyKey(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("decode stdout: %v\nout=%s", err, stdout)
 	}
-	if got["EnvId"] != "env_abc" {
-		t.Errorf("EnvId = %v", got["EnvId"])
+	if got["env_id"] != "env_abc" {
+		t.Errorf("env_id = %v", got["env_id"])
 	}
-	if got["State"] != "PROCESSING" {
-		t.Errorf("State = %v", got["State"])
+	if got["state"] != "PROCESSING" {
+		t.Errorf("state = %v", got["state"])
 	}
 }
 
@@ -256,8 +256,8 @@ func TestEnvUp_Wait_PollsUntilTerminal(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("decode stdout: %v\nout=%s", err, stdout)
 	}
-	if got["State"] != "SUCCESS" {
-		t.Errorf("final state = %v, want SUCCESS\nstderr=%s", got["State"], stderr)
+	if got["state"] != "SUCCESS" {
+		t.Errorf("final state = %v, want SUCCESS\nstderr=%s", got["state"], stderr)
 	}
 	// Status messages should appear on stderr.
 	if !strings.Contains(stderr, "still PROCESSING") {
@@ -325,8 +325,8 @@ func TestEnvStatus_HappyPath(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("decode stdout: %v", err)
 	}
-	if got["State"] != "READY" {
-		t.Errorf("State = %v", got["State"])
+	if got["state"] != "READY" {
+		t.Errorf("state = %v", got["state"])
 	}
 }
 
@@ -516,8 +516,8 @@ func TestEnvUp_WaitShortCircuitsOnTerminalInitial(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("decode stdout: %v\nout=%s", err, stdout)
 	}
-	if got["State"] != "SUCCESS" {
-		t.Errorf("State = %v, want SUCCESS", got["State"])
+	if got["state"] != "SUCCESS" {
+		t.Errorf("state = %v, want SUCCESS", got["state"])
 	}
 }
 
