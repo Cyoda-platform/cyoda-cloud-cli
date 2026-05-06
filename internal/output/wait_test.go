@@ -165,13 +165,18 @@ func TestPollUntilTerminal_StatusMessages(t *testing.T) {
 }
 
 func TestIsTerminalEnvState(t *testing.T) {
-	terminals := []string{"SUCCESS", "FAILED", "CANCELLED", "READY", "ERROR", "DELETED"}
+	terminals := []string{"SUCCESS", "FAILED", "CANCELLED"}
 	for _, s := range terminals {
 		if !IsTerminalEnvState(s) {
 			t.Errorf("IsTerminalEnvState(%q) = false, want true", s)
 		}
 	}
-	nonTerminals := []string{"PROCESSING", "PENDING", "", "success", "failed"}
+	// READY/ERROR/DELETED are not terminal — they're speculative server
+	// vocabulary not pinned in spec §4.3. See IsTerminalEnvState doc.
+	nonTerminals := []string{
+		"PROCESSING", "PENDING", "", "success", "failed",
+		"READY", "ERROR", "DELETED",
+	}
 	for _, s := range nonTerminals {
 		if IsTerminalEnvState(s) {
 			t.Errorf("IsTerminalEnvState(%q) = true, want false", s)

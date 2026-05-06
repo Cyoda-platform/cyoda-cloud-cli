@@ -129,11 +129,16 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 	}
 
 	if a.wait {
-		final, err := waitForEnvTerminal(cmd, cli)
-		if err != nil {
-			return err
+		// Short-circuit when the initial response is already terminal — e.g.
+		// an idempotent replay returning 200 with state=SUCCESS. There's
+		// nothing to poll for and the user shouldn't see "still …" lines.
+		if !output.IsTerminalEnvState(snap.State) {
+			final, err := waitForEnvTerminal(cmd, cli)
+			if err != nil {
+				return err
+			}
+			snap = final
 		}
-		snap = final
 	}
 
 	return renderEnv(cmd, f.asJSON, snap)
@@ -299,17 +304,24 @@ func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 		return nil
 	}
 
-	// Poll GET /v2/env until 404 (gone) or terminal state. This is the only
-	// channel the spec defines for teardown progress.
-	final, err := waitForEnvTeardown(cmd, cli)
-	if err != nil {
+	// Poll GET /v2/env until 404 (gone) or — in principle — a terminal env
+	// state. With IsTerminalEnvState narrowed to SUCCESS/FAILED/CANCELLED
+	// (spec §4.3 vocabulary), the 404 path is the primary signal for
+	// teardown completion: the server typically transitions through
+	// non-terminal states like DELETING and then removes the resource.
+	// A future server version that emits an explicit terminal state on
+	// teardown will be picked up only when added to IsTerminalEnvState.
+	if _, err := waitForEnvTeardown(cmd, cli); err != nil {
 		return err
 	}
-	if final == nil {
-		fmt.Fprintln(cmd.ErrOrStderr(), "env torn down.")
-		return nil
+	// Both exit paths (404 gone, or terminal state observed) are success.
+	// Don't render the snapshot — the env is torn down so any remembered
+	// state is stale and unhelpful.
+	fmt.Fprintln(cmd.ErrOrStderr(), "env torn down.")
+	if f.asJSON {
+		return output.JSON(cmd.OutOrStdout(), map[string]string{"status": "torn_down"})
 	}
-	return renderEnv(cmd, f.asJSON, final)
+	return nil
 }
 
 // ---- shared helpers ----
@@ -318,7 +330,10 @@ func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 // Used by env up --wait.
 func waitForEnvTerminal(cmd *cobra.Command, cli *api.ClientWithResponses) (*output.EnvSnapshot, error) {
 	var last *output.EnvSnapshot
-	state, err := output.PollUntilTerminal(cmd.Context(),
+	// The closure updates `last` on every successful poll and `last.State` is
+	// the canonical post-loop value, so the state returned by PollUntilTerminal
+	// is redundant here.
+	_, err := output.PollUntilTerminal(cmd.Context(),
 		func(ctx context.Context) (string, bool, error) {
 			resp, err := cli.GetV2EnvWithResponse(ctx)
 			if err != nil {
@@ -341,7 +356,6 @@ func waitForEnvTerminal(cmd *cobra.Command, cli *api.ClientWithResponses) (*outp
 	if err != nil {
 		return last, err
 	}
-	_ = state
 	return last, nil
 }
 

@@ -125,21 +125,18 @@ func PollUntilTerminal(ctx context.Context, fn PollFunc, opts WaitOpts) (string,
 	}
 }
 
-// IsTerminalEnvState reports whether s is one of the terminal env states per
-// spec §4.3 / OpenAPI: SUCCESS, FAILED, CANCELLED. Comparison is
-// case-insensitive on the canonical uppercase names; we also accept the
-// common "READY"/"RUNNING" → SUCCESS-equivalent mapping the server emits in
-// the env shape (see openapi.yaml § /v2/env GET — `state` is free-form, so
-// we treat any of the documented terminals as terminal).
+// IsTerminalEnvState reports whether s is a terminal state for env operations.
+// The vocabulary follows docs/spec.md §4.3 examples (SUCCESS, FAILED, CANCELLED).
+// Non-matching states are treated as non-terminal — the caller's poll loop will
+// either reach the 30 min total deadline or, for teardown, observe the 404 that
+// signals completion.
 //
-// Open question: the spec lists SUCCESS / FAILED / CANCELLED but the running
-// server has historically emitted READY / FAILED / CANCELLED for env. Until
-// the spec pins the exact set we accept both vocabularies. Add new terminals
-// here as the server's contract solidifies.
+// We deliberately avoid speculatively accepting other vocabularies (e.g.
+// READY/ERROR/DELETED). If the server emits something else we'll find out from
+// real usage and add it explicitly here. Speculative acceptance hides bugs.
 func IsTerminalEnvState(s string) bool {
 	switch s {
-	case "SUCCESS", "FAILED", "CANCELLED",
-		"READY", "ERROR", "DELETED":
+	case "SUCCESS", "FAILED", "CANCELLED":
 		return true
 	}
 	return false

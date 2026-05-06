@@ -350,6 +350,47 @@ func TestEnvDown_409StillDeployed(t *testing.T) {
 	}
 }
 
+// TestEnvUp_WaitShortCircuitsOnTerminalInitial covers the idempotent-replay
+// path: POST /v2/env returns 200 with state=SUCCESS already, so --wait must
+// skip the poll loop entirely (no GET, no "still …" status lines).
+func TestEnvUp_WaitShortCircuitsOnTerminalInitial(t *testing.T) {
+	var getCalls int32
+	envTestSetup(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v2/env":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK) // 200 = idempotent replay
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"env_id": "env_done", "namespace": "ns_done", "state": "SUCCESS",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/v2/env":
+			atomic.AddInt32(&getCalls, 1)
+			http.Error(w, "should not be called", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+
+	cmd := NewEnvCmd()
+	stdout, stderr, err := runWithFastWait(t, cmd, "up", "--backend", "x", "--wait", "--output-json")
+	if err != nil {
+		t.Fatalf("env up --wait (terminal initial): %v\nstderr=%s", err, stderr)
+	}
+	if n := atomic.LoadInt32(&getCalls); n != 0 {
+		t.Errorf("GET /v2/env calls = %d, want 0 (short-circuit)", n)
+	}
+	if strings.Contains(stderr, "still ") {
+		t.Errorf("stderr should not contain wait status lines:\n%s", stderr)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("decode stdout: %v\nout=%s", err, stdout)
+	}
+	if got["State"] != "SUCCESS" {
+		t.Errorf("State = %v, want SUCCESS", got["State"])
+	}
+}
+
 func TestEnvDown_Wait_PollsUntilGone(t *testing.T) {
 	var calls int32
 	envTestSetup(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -384,6 +425,59 @@ func TestEnvDown_Wait_PollsUntilGone(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "torn down") {
 		t.Errorf("stderr missing torn-down notice:\n%s", stderr)
+	}
+}
+
+// TestEnvDown_Wait_TerminalStateBefore404 covers the terminal-state exit
+// path of waitForEnvTeardown: the server reports a terminal state (e.g.
+// CANCELLED — one of the spec §4.3 vocabulary) on the first poll. The loop
+// must exit immediately, the user-facing message must still be "env torn
+// down.", and --output-json must emit {"status":"torn_down"} on stdout.
+func TestEnvDown_Wait_TerminalStateBefore404(t *testing.T) {
+	var getCalls int32
+	envTestSetup(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/v2/env":
+			w.WriteHeader(http.StatusAccepted)
+		case r.Method == http.MethodGet && r.URL.Path == "/v2/env":
+			n := atomic.AddInt32(&getCalls, 1)
+			if n == 1 {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"env_id": "env_w", "namespace": "ns_w", "state": "CANCELLED",
+				})
+				return
+			}
+			// Any subsequent poll fails the test — the terminal state on the
+			// first poll must short-circuit the loop.
+			t.Errorf("unexpected extra poll #%d after terminal state", n)
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"type": "about:blank", "title": "gone", "status": 404,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+
+	cmd := NewEnvCmd()
+	stdout, stderr, err := runWithFastWait(t, cmd, "down", "--wait", "--output-json")
+	if err != nil {
+		t.Fatalf("env down --wait: %v\nstderr=%s", err, stderr)
+	}
+	if n := atomic.LoadInt32(&getCalls); n != 1 {
+		t.Errorf("GET polls = %d, want exactly 1 (terminal on first)", n)
+	}
+	if !strings.Contains(stderr, "env torn down.") {
+		t.Errorf("stderr missing torn-down notice:\n%s", stderr)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("decode stdout: %v\nout=%s", err, stdout)
+	}
+	if got["status"] != "torn_down" {
+		t.Errorf("stdout status = %v, want torn_down", got["status"])
 	}
 }
 
