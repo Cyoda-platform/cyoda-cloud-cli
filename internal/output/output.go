@@ -70,6 +70,72 @@ func EnvTable(w io.Writer, e *EnvSnapshot) error {
 	return tw.Flush()
 }
 
+// BuildSnapshot is the unified-shape for build-table rendering. It mirrors
+// the *api.Build fields the CLI surfaces; pointer-typed source fields are
+// flattened to plain strings so callers don't repeat nil-deref boilerplate.
+type BuildSnapshot struct {
+	BuildId       string
+	Action        string
+	State         string
+	BranchName    string
+	CreatedAt     string
+	JobStatus     string
+	JobStatusText string
+	PipelineName  string
+	ChatId        string
+}
+
+// BuildTable renders a single BuildSnapshot as a two-column key/value table.
+// Empty optional fields are omitted so the output stays compact for the
+// queued-only case (where most fields are empty).
+func BuildTable(w io.Writer, b *BuildSnapshot) error {
+	if b == nil {
+		return errors.New("output: BuildTable: nil BuildSnapshot")
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	rows := [][2]string{
+		{"BUILD_ID", b.BuildId},
+		{"ACTION", b.Action},
+		{"STATE", b.State},
+	}
+	addOpt := func(k, v string) {
+		if v != "" {
+			rows = append(rows, [2]string{k, v})
+		}
+	}
+	addOpt("BRANCH_NAME", b.BranchName)
+	addOpt("CREATED_AT", b.CreatedAt)
+	addOpt("PIPELINE_NAME", b.PipelineName)
+	addOpt("JOB_STATUS", b.JobStatus)
+	addOpt("JOB_STATUS_TEXT", b.JobStatusText)
+	addOpt("CHAT_ID", b.ChatId)
+	for _, r := range rows {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\n", r[0], r[1]); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
+}
+
+// BuildListTable renders a list of BuildSnapshots as a tabular view with a
+// fixed column order: BUILD_ID, ACTION, STATE, CREATED_AT. The schema's
+// branch_name field is not on the Build model — it's a request-side field —
+// so it's omitted here. The nextCursor argument is informational; when
+// non-empty the caller is expected to print it elsewhere (typically stderr).
+func BuildListTable(w io.Writer, bs []BuildSnapshot) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(tw, "BUILD_ID\tACTION\tSTATE\tCREATED_AT"); err != nil {
+		return err
+	}
+	for _, b := range bs {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+			b.BuildId, b.Action, b.State, b.CreatedAt); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
+}
+
 // MeTable renders an *api.Me as a three-section human-readable table:
 // identity, quota, features. Output is deterministic — features are sorted
 // alphabetically by key, slice fields are joined with ", ".

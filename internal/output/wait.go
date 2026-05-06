@@ -141,3 +141,19 @@ func IsTerminalEnvState(s string) bool {
 	}
 	return false
 }
+
+// IsTerminalAppState reports whether s is a terminal state for app build /
+// deploy operations. The vocabulary follows docs/spec.md §4.3 — the spec
+// uses the same terminal vocabulary for env and app entities. We keep the
+// helpers separate so future divergence (e.g. an app-only TIMEOUT state)
+// does not require touching env code.
+//
+// Mirrors IsTerminalEnvState's discipline: speculative states are not
+// accepted. If the server emits something else we'll add it explicitly.
+func IsTerminalAppState(s string) bool {
+	switch s {
+	case "SUCCESS", "FAILED", "CANCELLED":
+		return true
+	}
+	return false
+}
