@@ -126,7 +126,7 @@ func runAppBuildOrDeploy(cmd *cobra.Command, f appCommonFlags, a appBuildArgs, a
 	}
 
 	ctx := cmd.Context()
-	b, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}
@@ -239,7 +239,7 @@ func runAppList(cmd *cobra.Command, f appCommonFlags, a appListArgs) error {
 	f.org = resolveOrg(cmd, f.org)
 	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
 	ctx := cmd.Context()
-	b, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func runAppStatus(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 	f.org = resolveOrg(cmd, f.org)
 	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
 	ctx := cmd.Context()
-	b, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}
@@ -375,7 +375,7 @@ func newAppCancelCmd() *cobra.Command {
 func runAppCancel(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 	f.org = resolveOrg(cmd, f.org)
 	ctx := cmd.Context()
-	b, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}
@@ -422,7 +422,7 @@ func newAppDeleteCmd() *cobra.Command {
 func runAppDelete(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 	f.org = resolveOrg(cmd, f.org)
 	ctx := cmd.Context()
-	b, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}

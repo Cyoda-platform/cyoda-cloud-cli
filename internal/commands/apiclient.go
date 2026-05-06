@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"runtime"
 
+	"github.com/spf13/cobra"
+
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/api"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/auth"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/config"
@@ -14,6 +16,24 @@ import (
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/output"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/version"
 )
+
+// shouldRefreshDiscovery reports whether the global --refresh-discovery flag
+// is set on the root cobra command. It walks up to the root so the flag
+// (declared on root.PersistentFlags) is found regardless of how deep the
+// invoked subcommand sits. Returns false if the flag isn't registered (e.g.
+// in a unit test that builds a subcommand in isolation) — that path is
+// indistinguishable from "not set" from the caller's perspective.
+func shouldRefreshDiscovery(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	root := cmd.Root()
+	v, err := root.PersistentFlags().GetBool("refresh-discovery")
+	if err != nil {
+		return false
+	}
+	return v
+}
 
 // APIBuild bundles the dependencies a command needs to call the manager API.
 //
@@ -49,15 +69,15 @@ type APIBuild struct {
 //     callers surface the same actionable text. Other keychain errors wrap
 //     "keychain load: ...".
 //
-// The ctx parameter is plumbed into the discovery loader's HTTP fetch — pass
-// cmd.Context() so cobra's signal handler can cancel a hung discovery call.
-// (LoadDiscovery does not currently take a context; we accept ctx now for
-// forward compatibility and to keep the signature stable as Tasks 6/7 add
-// context-aware discovery.)
-func BuildAPIClient(ctx context.Context, org string) (*APIBuild, error) {
-	_ = ctx // reserved for future context-aware discovery; see godoc.
+// The cmd parameter is consulted for the global --refresh-discovery flag (so
+// callers can force-bypass the 24h discovery cache) and is the source of the
+// context plumbed into future context-aware discovery fetches. Passing the
+// cobra command directly (rather than just a context.Context) avoids a
+// cascading signature change every time a new global flag is added.
+func BuildAPIClient(cmd *cobra.Command, org string) (*APIBuild, error) {
+	_ = cmd.Context() // reserved for future context-aware discovery; see godoc.
 
-	d, err := config.LoadDiscovery(config.ResolveDiscoveryURL(), false)
+	d, err := config.LoadDiscovery(config.ResolveDiscoveryURL(), shouldRefreshDiscovery(cmd))
 	if err != nil {
 		return nil, fmt.Errorf("discovery: %w", err)
 	}

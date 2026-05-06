@@ -24,6 +24,12 @@ func run() int {
 		Use:   "cyoda-cloud",
 		Short: "Cyoda Cloud command-line interface",
 	}
+	// --refresh-discovery is a global flag (spec §6.7) that forces the next
+	// discovery fetch to bypass the 24h cache. Subcommands consult it via
+	// commands.shouldRefreshDiscovery so the wiring stays out of every
+	// command's flag set.
+	root.PersistentFlags().Bool("refresh-discovery", false,
+		"Force re-fetch of the discovery file (bypass 24h cache)")
 	root.AddCommand(commands.NewVersionCmd())
 	root.AddCommand(commands.NewLoginCmd())
 	root.AddCommand(commands.NewRegisterCmd())

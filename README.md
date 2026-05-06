@@ -61,6 +61,41 @@ cosign verify ghcr.io/cyoda-platform/cyoda-cloud-cli:<tag> \
 The accompanying `*.spdx.sbom.json` document lists every Go module shipped in
 the archive.
 
+## Discovery file deployment
+
+The CLI ships with no baked-in API host. On first run it fetches
+`https://cyoda.cloud/.well-known/cyoda-cloud-cli.json`, caches it for 24
+hours, and uses the values to drive both the API base URL and the Auth0
+client. The source-of-truth file lives in this repo at
+`deploy/discovery/cyoda-cloud-cli.json`.
+
+The team deploys this file via Cloudflare Pages (or whichever static-asset
+host is in use). Path on the production host:
+`/.well-known/cyoda-cloud-cli.json`.
+
+When the Auth0 native client ID rotates or the API URL changes:
+1. Edit `deploy/discovery/cyoda-cloud-cli.json` (the placeholder values
+   `TENANT.eu.auth0.com` / `REPLACE_WITH_NATIVE_APP_CLIENT_ID` must be
+   replaced before publication).
+2. Open a PR; merge after review.
+3. Roll out the static-asset host's deployment.
+4. End users see the change after their 24-hour cache expires, or
+   immediately by passing `--refresh-discovery` on any command.
+
+The Auth0 client ID and tenant domain are public identifiers — there are no
+secrets in this file.
+
+### Local development override
+
+For testing against a local manager:
+
+- Set `CYODA_CLOUD_DISCOVERY_URL=file:///path/to/local/cyoda-cloud-cli.json`
+  in the environment, or
+- Run `cyoda-cloud config set discovery_url file:///path/to/local/cyoda-cloud-cli.json`.
+
+Either path bypasses the 24h on-disk cache (file:// URLs are always
+re-read).
+
 ## CI
 
 - `ci.yml` — build, test, lint on every PR / `main` push.

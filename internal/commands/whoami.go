@@ -43,7 +43,7 @@ func runWhoami(cmd *cobra.Command, org string, asJSON bool) error {
 	org = resolveOrg(cmd, org)
 	asJSON = resolveOutputJSON(cmd, asJSON)
 	ctx := cmd.Context()
-	b, err := BuildAPIClient(ctx, org)
+	b, err := BuildAPIClient(cmd, org)
 	if err != nil {
 		return err
 	}

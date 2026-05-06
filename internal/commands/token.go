@@ -52,7 +52,7 @@ func runTokenPrint(cmd *cobra.Command, org string, show bool) error {
 	}
 	org = resolveOrg(cmd, org)
 	ctx := cmd.Context()
-	b, err := BuildAPIClient(ctx, org)
+	b, err := BuildAPIClient(cmd, org)
 	if err != nil {
 		return err
 	}

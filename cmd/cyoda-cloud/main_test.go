@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -15,6 +18,39 @@ func TestRun_ExitsZeroOnHelp(t *testing.T) {
 	os.Args = []string{"cyoda-cloud", "--help"}
 	if got := run(); got != 0 {
 		t.Errorf("run(--help) = %d, want 0", got)
+	}
+}
+
+// TestRun_HelpShowsRefreshDiscoveryFlag asserts that the global
+// --refresh-discovery persistent flag is wired to the root command and
+// surfaces in `cyoda-cloud --help`. This is the user-visible contract of
+// spec §6.7's "force re-fetch" affordance.
+func TestRun_HelpShowsRefreshDiscoveryFlag(t *testing.T) {
+	old := os.Args
+	t.Cleanup(func() { os.Args = old })
+	os.Args = []string{"cyoda-cloud", "--help"}
+
+	// run() writes help via cobra to os.Stdout; capture it.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	go func() {
+		_ = run()
+		_ = w.Close()
+	}()
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("read help: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "--refresh-discovery") {
+		t.Errorf("--help output does not contain --refresh-discovery; got:\n%s", buf.String())
 	}
 }
 

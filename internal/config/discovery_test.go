@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -156,5 +157,55 @@ func TestLoadDiscoveryFileSchemeBypassesCache(t *testing.T) {
 	cachePath := filepath.Join(tmpHome, "cyoda-cloud", "discovery.json")
 	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
 		t.Fatalf("expected no cache file at %s, got err=%v", cachePath, err)
+	}
+}
+
+// TestLoadDiscoveryForceBypassesFreshCache verifies the --refresh-discovery
+// flag's underlying mechanism: even when a fresh on-disk cache exists,
+// LoadDiscovery(_, force=true) re-fetches over HTTP. The companion path —
+// force=false using the cache — is asserted in the same test by counting the
+// upstream's hit count.
+func TestLoadDiscoveryForceBypassesFreshCache(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpHome)
+
+	var hits atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/cyoda-cloud-cli.json", func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"api_url":"https://api.cyoda.cloud",
+			"auth0_domain":"tenant.eu.auth0.com",
+			"auth0_client_id":"native-client-id",
+			"auth0_audience":"https://api.cyoda.cloud"
+		}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	url := srv.URL + "/.well-known/cyoda-cloud-cli.json"
+
+	// First call: no cache yet -> network hit, write cache.
+	if _, err := LoadDiscovery(url, false); err != nil {
+		t.Fatalf("first LoadDiscovery: %v", err)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("after first call, hits=%d want 1", got)
+	}
+
+	// Second call without force: fresh cache should serve, no new hit.
+	if _, err := LoadDiscovery(url, false); err != nil {
+		t.Fatalf("second LoadDiscovery: %v", err)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("cached call hit upstream: hits=%d want 1", got)
+	}
+
+	// Third call WITH force: must bypass the fresh cache and re-fetch.
+	if _, err := LoadDiscovery(url, true); err != nil {
+		t.Fatalf("forced LoadDiscovery: %v", err)
+	}
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("force=true did not re-fetch: hits=%d want 2", got)
 	}
 }

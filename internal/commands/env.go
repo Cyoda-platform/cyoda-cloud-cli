@@ -123,7 +123,7 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 	}
 
 	ctx := cmd.Context()
-	b, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}
@@ -231,7 +231,7 @@ func runEnvStatus(cmd *cobra.Command, f envCommonFlags) error {
 	f.org = resolveOrg(cmd, f.org)
 	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
 	ctx := cmd.Context()
-	b, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}
@@ -293,7 +293,7 @@ func newEnvCancelCmd() *cobra.Command {
 func runEnvCancel(cmd *cobra.Command, f envCommonFlags) error {
 	f.org = resolveOrg(cmd, f.org)
 	ctx := cmd.Context()
-	b, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}
@@ -349,7 +349,7 @@ func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 	f.org = resolveOrg(cmd, f.org)
 	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
 	ctx := cmd.Context()
-	b, err := BuildAPIClient(ctx, f.org)
+	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}

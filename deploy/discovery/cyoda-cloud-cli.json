@@ -1,0 +1,6 @@
+{
+  "api_url": "https://api.cyoda.cloud",
+  "auth0_domain": "TENANT.eu.auth0.com",
+  "auth0_client_id": "REPLACE_WITH_NATIVE_APP_CLIENT_ID",
+  "auth0_audience": "https://api.cyoda.cloud"
+}

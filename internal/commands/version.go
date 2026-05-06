@@ -77,7 +77,7 @@ func runVersionCheck(cmd *cobra.Command) error {
 		fmt.Fprintln(stderr, "running development build; min-version check skipped.")
 		return nil
 	}
-	min, err := loadOrFetchMinVersion(cmd.Context())
+	min, err := loadOrFetchMinVersion(cmd.Context(), shouldRefreshDiscovery(cmd))
 	if err != nil {
 		// Discovery / HTTP / parse failure. Map to UpstreamFailure (9) — the
 		// CLI itself isn't refusing service; the manager couldn't answer. Not
@@ -139,15 +139,22 @@ type minVersionCache struct {
 // loadOrFetchMinVersion returns the served min, hitting the cache when fresh
 // (≤24h) and otherwise re-fetching. Cache writes are best-effort; a failed
 // write does not propagate.
-func loadOrFetchMinVersion(ctx context.Context) (string, error) {
+func loadOrFetchMinVersion(ctx context.Context, refreshDiscovery bool) (string, error) {
 	cachePath := filepath.Join(config.ConfigDir(), "min-cli-version.json")
-	if m, ok := readMinVersionCache(cachePath); ok {
-		return m, nil
+	// --refresh-discovery also bypasses the min-version cache. The two values
+	// are independent on disk but conceptually paired: an operator who is
+	// rotating the discovery document is also the operator most likely to be
+	// pushing a fresh min-version, and forcing one without the other leaves a
+	// confusing 24h window where the CLI sees stale data.
+	if !refreshDiscovery {
+		if m, ok := readMinVersionCache(cachePath); ok {
+			return m, nil
+		}
 	}
 
 	// Resolve the API base via discovery; the served endpoint is
 	// <api>/v2/.well-known/cli-min-version.
-	d, err := config.LoadDiscovery(config.ResolveDiscoveryURL(), false)
+	d, err := config.LoadDiscovery(config.ResolveDiscoveryURL(), refreshDiscovery)
 	if err != nil {
 		return "", fmt.Errorf("discovery: %w", err)
 	}

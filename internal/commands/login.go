@@ -62,7 +62,7 @@ func runLogin(cmd *cobra.Command, opts loginOpts) error {
 	// makes `cyoda-cloud login` and subsequent `whoami`/`env`/`app` calls
 	// land on the same profile by default.
 	opts.Org = resolveOrg(cmd, opts.Org)
-	d, err := config.LoadDiscovery(config.ResolveDiscoveryURL(), false)
+	d, err := config.LoadDiscovery(config.ResolveDiscoveryURL(), shouldRefreshDiscovery(cmd))
 	if err != nil {
 		return fmt.Errorf("discovery: %w", err)
 	}
