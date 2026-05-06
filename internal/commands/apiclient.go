@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"runtime"
 
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/api"
@@ -58,11 +57,7 @@ type APIBuild struct {
 func BuildAPIClient(ctx context.Context, org string) (*APIBuild, error) {
 	_ = ctx // reserved for future context-aware discovery; see godoc.
 
-	discoURL := config.DefaultDiscoveryURL
-	if v := os.Getenv(envDiscoveryURL); v != "" {
-		discoURL = v
-	}
-	d, err := config.LoadDiscovery(discoURL, false)
+	d, err := config.LoadDiscovery(config.ResolveDiscoveryURL(), false)
 	if err != nil {
 		return nil, fmt.Errorf("discovery: %w", err)
 	}

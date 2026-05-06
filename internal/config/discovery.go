@@ -28,6 +28,30 @@ type Discovery struct {
 // DefaultDiscoveryURL is the production discovery endpoint.
 const DefaultDiscoveryURL = "https://cyoda.cloud/.well-known/cyoda-cloud-cli.json"
 
+// EnvDiscoveryURL is the env var that overrides the discovery URL. Lifted
+// from docs/cli-handover.md §"Auth0 setup" so local development can point
+// the CLI at a file:// or staging discovery document.
+const EnvDiscoveryURL = "CYODA_CLOUD_DISCOVERY_URL"
+
+// ResolveDiscoveryURL returns the URL to fetch discovery from, applying the
+// standard CLI precedence: env var (CYODA_CLOUD_DISCOVERY_URL) > config file
+// (discovery_url) > DefaultDiscoveryURL.
+//
+// A LoadFile failure is silently swallowed — the env var path and the
+// hard-coded default still work even when the user's config TOML is
+// malformed, and discovery resolution shouldn't fail the command for an
+// orthogonal config-file problem. (Malformed TOML is reported by
+// `cyoda-cloud config get/set/list` which call LoadFile directly.)
+func ResolveDiscoveryURL() string {
+	if v := os.Getenv(EnvDiscoveryURL); v != "" {
+		return v
+	}
+	if f, err := LoadFile(); err == nil && f.DiscoveryURL != "" {
+		return f.DiscoveryURL
+	}
+	return DefaultDiscoveryURL
+}
+
 const cacheTTL = 24 * time.Hour
 
 // maxDiscoveryBody caps the response body to 64 KiB; the document is tiny and
@@ -62,6 +86,10 @@ func fetchDiscoveryHTTP(rawURL string) (Discovery, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", version.UserAgent(version.Version, runtime.GOOS, runtime.GOARCH))
+	// Mirror the headers commands/version.go's min-version fetch sets so the
+	// manager (and any HTTP middleware) sees a consistent identity for both
+	// the discovery and min-version endpoints.
+	req.Header.Set("Cyoda-Cloud-CLI-Version", version.Version)
 
 	resp, err := discoveryClient.Do(req)
 	if err != nil {

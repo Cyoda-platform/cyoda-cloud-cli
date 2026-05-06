@@ -32,10 +32,18 @@ func runConfig(t *testing.T, args ...string) (stdout, stderr string, err error) 
 func TestConfig_SetGetRoundTrip(t *testing.T) {
 	withXDG(t)
 
-	if _, _, err := runConfig(t, "set", "default_org", "acme"); err != nil {
+	stdout, stderr, err := runConfig(t, "set", "default_org", "acme")
+	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	stdout, _, err := runConfig(t, "get", "default_org")
+	// Confirmation goes to stderr; stdout stays clean for scripting.
+	if stdout != "" {
+		t.Errorf("set stdout should be empty, got: %q", stdout)
+	}
+	if !strings.Contains(stderr, "default_org=acme") {
+		t.Errorf("set stderr should confirm, got: %q", stderr)
+	}
+	stdout, _, err = runConfig(t, "get", "default_org")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}

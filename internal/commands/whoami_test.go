@@ -14,6 +14,7 @@ import (
 
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/api"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/auth"
+	"github.com/cyoda-platform/cyoda-cloud-cli/internal/config"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/keychain"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/output"
 )
@@ -176,5 +177,122 @@ func TestWhoami_HappyPathJSON(t *testing.T) {
 	}
 	if stored.RefreshToken != "RT-rotated" {
 		t.Errorf("refresh token after whoami = %q, want RT-rotated", stored.RefreshToken)
+	}
+}
+
+// TestWhoami_DefaultOrgFromConfig verifies that with default_org="abc" in
+// config.toml and no --org flag, the resolved org reaches BuildAPIClient
+// (and therefore keychain.Load). We seed the keychain only under "abc" — if
+// the resolution fell back to "" the command would fail with not-logged-in.
+func TestWhoami_DefaultOrgFromConfig(t *testing.T) {
+	setupFileFallback(t)
+
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/me" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		me := api.Me{UserId: "auth0|abc", OrgId: "org_abc", Tier: "free"}
+		_ = json.NewEncoder(w).Encode(me)
+	}))
+	defer apiSrv.Close()
+
+	stubDiscoveryFile(t, apiSrv.URL)
+	_, cleanup := stubAuth0Token(t, "AT-fresh")
+	defer cleanup()
+
+	// Seed only the "abc" profile — the "" profile is intentionally absent so
+	// a default-org=="" fallback would fail with ErrNotFound.
+	if err := keychain.Store(keychain.Profile{
+		Org:           "abc",
+		RefreshToken:  "RT0",
+		APIURL:        apiSrv.URL,
+		Auth0Domain:   "ignored.example",
+		Auth0ClientID: "client-id",
+		Auth0Audience: "https://api.cyoda.cloud",
+	}); err != nil {
+		t.Fatalf("seed keychain: %v", err)
+	}
+
+	// Persist default_org=abc in config.toml. setupFileFallback already
+	// scopes XDG_CONFIG_HOME to a tempdir.
+	if err := config.SaveFile(config.File{DefaultOrg: "abc"}); err != nil {
+		t.Fatalf("SaveFile: %v", err)
+	}
+
+	cmd := NewWhoamiCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"--output-json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("whoami: %v\nstderr=%s", err, stderr.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decode stdout: %v\nout=%s", err, stdout.String())
+	}
+	if got["org_id"] != "org_abc" {
+		t.Errorf("org_id = %v, want org_abc", got["org_id"])
+	}
+}
+
+// TestWhoami_OutputFormatJSONFromConfig verifies that with output_format=json
+// in config.toml and no --output-json flag, whoami emits JSON to stdout.
+// stdoutIsTerminal is forced true so table would be the natural path.
+func TestWhoami_OutputFormatJSONFromConfig(t *testing.T) {
+	setupFileFallback(t)
+
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/me" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		me := api.Me{UserId: "auth0|abc", OrgId: "org_acme", Tier: "free"}
+		_ = json.NewEncoder(w).Encode(me)
+	}))
+	defer apiSrv.Close()
+
+	stubDiscoveryFile(t, apiSrv.URL)
+	_, cleanup := stubAuth0Token(t, "AT-fresh")
+	defer cleanup()
+
+	if err := keychain.Store(keychain.Profile{
+		Org:           "",
+		RefreshToken:  "RT0",
+		APIURL:        apiSrv.URL,
+		Auth0Domain:   "ignored.example",
+		Auth0ClientID: "client-id",
+		Auth0Audience: "https://api.cyoda.cloud",
+	}); err != nil {
+		t.Fatalf("seed keychain: %v", err)
+	}
+	if err := config.SaveFile(config.File{OutputFormat: "json"}); err != nil {
+		t.Fatalf("SaveFile: %v", err)
+	}
+
+	// Pretend stdout is a TTY so the JSON path is only taken because of the
+	// config override, not because of the non-TTY auto-JSON fallback.
+	prev := stdoutIsTerminal
+	stdoutIsTerminal = func() bool { return true }
+	t.Cleanup(func() { stdoutIsTerminal = prev })
+
+	cmd := NewWhoamiCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{}) // no --output-json
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("whoami: %v\nstderr=%s", err, stderr.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("expected JSON on stdout, decode failed: %v\nout=%s",
+			err, stdout.String())
+	}
+	if got["user_id"] != "auth0|abc" {
+		t.Errorf("user_id = %v", got["user_id"])
 	}
 }

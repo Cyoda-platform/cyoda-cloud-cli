@@ -50,6 +50,7 @@ func runTokenPrint(cmd *cobra.Command, org string, show bool) error {
 				"refusing to print access token without --show. Tokens grant API access; pass --show to confirm."),
 		}
 	}
+	org = resolveOrg(cmd, org)
 	ctx := cmd.Context()
 	b, err := BuildAPIClient(ctx, org)
 	if err != nil {

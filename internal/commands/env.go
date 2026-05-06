@@ -101,6 +101,8 @@ type envUpArgs struct {
 }
 
 func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
+	f.org = resolveOrg(cmd, f.org)
+	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
 	if a.backend == "" {
 		// Spec says backend is required. Don't hardcode a default — surface
 		// a clear error so the user (or shell completion) supplies one.
@@ -226,6 +228,8 @@ func newEnvStatusCmd() *cobra.Command {
 }
 
 func runEnvStatus(cmd *cobra.Command, f envCommonFlags) error {
+	f.org = resolveOrg(cmd, f.org)
+	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
 	ctx := cmd.Context()
 	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
@@ -287,6 +291,7 @@ func newEnvCancelCmd() *cobra.Command {
 }
 
 func runEnvCancel(cmd *cobra.Command, f envCommonFlags) error {
+	f.org = resolveOrg(cmd, f.org)
 	ctx := cmd.Context()
 	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
@@ -341,6 +346,8 @@ func newEnvDownCmd() *cobra.Command {
 }
 
 func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
+	f.org = resolveOrg(cmd, f.org)
+	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
 	ctx := cmd.Context()
 	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {

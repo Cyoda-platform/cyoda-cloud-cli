@@ -147,11 +147,7 @@ func loadOrFetchMinVersion(ctx context.Context) (string, error) {
 
 	// Resolve the API base via discovery; the served endpoint is
 	// <api>/v2/.well-known/cli-min-version.
-	discoURL := config.DefaultDiscoveryURL
-	if v := os.Getenv(envDiscoveryURL); v != "" {
-		discoURL = v
-	}
-	d, err := config.LoadDiscovery(discoURL, false)
+	d, err := config.LoadDiscovery(config.ResolveDiscoveryURL(), false)
 	if err != nil {
 		return "", fmt.Errorf("discovery: %w", err)
 	}

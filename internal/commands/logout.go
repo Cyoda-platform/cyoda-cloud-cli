@@ -28,6 +28,7 @@ func NewLogoutCmd() *cobra.Command {
 }
 
 func runLogout(cmd *cobra.Command, org string) error {
+	org = resolveOrg(cmd, org)
 	stderr := cmd.ErrOrStderr()
 	profile, err := keychain.Load(org)
 	if err != nil {

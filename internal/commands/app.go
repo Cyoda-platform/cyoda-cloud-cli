@@ -101,6 +101,8 @@ func bindAppBuildFlags(cmd *cobra.Command, f *appCommonFlags, a *appBuildArgs) {
 }
 
 func runAppBuildOrDeploy(cmd *cobra.Command, f appCommonFlags, a appBuildArgs, action api.PostV2BuildsJSONBodyAction) error {
+	f.org = resolveOrg(cmd, f.org)
+	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
 	if a.repo == "" {
 		return &output.CLIError{
 			Code: output.CodeBadUsage,
@@ -234,6 +236,8 @@ func newAppListCmd() *cobra.Command {
 }
 
 func runAppList(cmd *cobra.Command, f appCommonFlags, a appListArgs) error {
+	f.org = resolveOrg(cmd, f.org)
+	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
 	ctx := cmd.Context()
 	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
@@ -321,6 +325,8 @@ func newAppStatusCmd() *cobra.Command {
 }
 
 func runAppStatus(cmd *cobra.Command, f appCommonFlags, buildID string) error {
+	f.org = resolveOrg(cmd, f.org)
+	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
 	ctx := cmd.Context()
 	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
@@ -367,6 +373,7 @@ func newAppCancelCmd() *cobra.Command {
 }
 
 func runAppCancel(cmd *cobra.Command, f appCommonFlags, buildID string) error {
+	f.org = resolveOrg(cmd, f.org)
 	ctx := cmd.Context()
 	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {
@@ -413,6 +420,7 @@ func newAppDeleteCmd() *cobra.Command {
 }
 
 func runAppDelete(cmd *cobra.Command, f appCommonFlags, buildID string) error {
+	f.org = resolveOrg(cmd, f.org)
 	ctx := cmd.Context()
 	b, err := BuildAPIClient(ctx, f.org)
 	if err != nil {

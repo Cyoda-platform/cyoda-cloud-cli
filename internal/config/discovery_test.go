@@ -90,6 +90,43 @@ func TestFetchDiscoveryFileSchemeAllowsLocalhostHost(t *testing.T) {
 	}
 }
 
+func TestResolveDiscoveryURL_Precedence(t *testing.T) {
+	// env > config-file > default. Each subtest builds the precise overlap
+	// it cares about so the absent-priority paths are also covered.
+
+	t.Run("default when nothing set", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		t.Setenv(EnvDiscoveryURL, "")
+		if got := ResolveDiscoveryURL(); got != DefaultDiscoveryURL {
+			t.Errorf("ResolveDiscoveryURL = %q, want %q", got, DefaultDiscoveryURL)
+		}
+	})
+
+	t.Run("config-file overrides default", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		t.Setenv(EnvDiscoveryURL, "")
+		want := "https://config.example/disco.json"
+		if err := SaveFile(File{DiscoveryURL: want}); err != nil {
+			t.Fatalf("SaveFile: %v", err)
+		}
+		if got := ResolveDiscoveryURL(); got != want {
+			t.Errorf("ResolveDiscoveryURL = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("env overrides config-file", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		want := "https://env.example/disco.json"
+		t.Setenv(EnvDiscoveryURL, want)
+		if err := SaveFile(File{DiscoveryURL: "https://config.example/disco.json"}); err != nil {
+			t.Fatalf("SaveFile: %v", err)
+		}
+		if got := ResolveDiscoveryURL(); got != want {
+			t.Errorf("ResolveDiscoveryURL = %q, want %q", got, want)
+		}
+	})
+}
+
 func TestLoadDiscoveryFileSchemeBypassesCache(t *testing.T) {
 	// Point XDG_CONFIG_HOME at a temp dir so we can verify no cache is written.
 	tmpHome := t.TempDir()

@@ -4,7 +4,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -12,10 +11,6 @@ import (
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/config"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/keychain"
 )
-
-// envDiscoveryURL allows local development against a file:// or staging
-// discovery URL. Lifted from docs/cli-handover.md §"Auth0 setup".
-const envDiscoveryURL = "CYODA_CLOUD_DISCOVERY_URL"
 
 // loginOpts captures the resolved options for an interactive login. Both
 // `login` and `register` build one of these and call runLogin — register
@@ -62,11 +57,12 @@ func newLoginCmd() *cobra.Command {
 // command and lets register hard-code Signup=true without ever exposing the
 // flag.
 func runLogin(cmd *cobra.Command, opts loginOpts) error {
-	discoURL := config.DefaultDiscoveryURL
-	if v := os.Getenv(envDiscoveryURL); v != "" {
-		discoURL = v
-	}
-	d, err := config.LoadDiscovery(discoURL, false)
+	// Apply config-file default_org when --org is unset; the resolved org is
+	// what the keychain profile is keyed by, so a `default_org=acme` config
+	// makes `cyoda-cloud login` and subsequent `whoami`/`env`/`app` calls
+	// land on the same profile by default.
+	opts.Org = resolveOrg(cmd, opts.Org)
+	d, err := config.LoadDiscovery(config.ResolveDiscoveryURL(), false)
 	if err != nil {
 		return fmt.Errorf("discovery: %w", err)
 	}

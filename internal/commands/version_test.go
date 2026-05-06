@@ -90,7 +90,7 @@ func TestVersionCheck_HappyPath(t *testing.T) {
 	defer closeSrv()
 	stubDiscoveryFile(t, apiURL)
 
-	_, stderr, err := runVersion(t, "--check")
+	stdout, stderr, err := runVersion(t, "--check")
 	if err != nil {
 		t.Fatalf("version --check: %v\nstderr=%s", err, stderr)
 	}
@@ -99,6 +99,11 @@ func TestVersionCheck_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "current") {
 		t.Errorf("stderr = %q, want \"current\" message", stderr)
+	}
+	// version --check emits its status to stderr only; stdout must be clean
+	// so callers can pipe-without-noise.
+	if stdout != "" {
+		t.Errorf("stdout should be empty, got: %q", stdout)
 	}
 }
 
@@ -110,7 +115,7 @@ func TestVersionCheck_Outdated(t *testing.T) {
 	defer closeSrv()
 	stubDiscoveryFile(t, apiURL)
 
-	_, stderr, err := runVersion(t, "--check")
+	stdout, stderr, err := runVersion(t, "--check")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -125,6 +130,10 @@ func TestVersionCheck_Outdated(t *testing.T) {
 	if !strings.Contains(stderr, "below required minimum") &&
 		!strings.Contains(err.Error(), "below required minimum") {
 		t.Errorf("expected below-minimum message, stderr=%q err=%v", stderr, err)
+	}
+	// Outdated path is still stderr-only; stdout must remain clean.
+	if stdout != "" {
+		t.Errorf("stdout should be empty, got: %q", stdout)
 	}
 }
 
