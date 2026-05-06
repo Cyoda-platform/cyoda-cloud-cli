@@ -104,7 +104,11 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 	if a.backend == "" {
 		// Spec says backend is required. Don't hardcode a default — surface
 		// a clear error so the user (or shell completion) supplies one.
-		return errors.New("--backend is required")
+		// Spec §6.6: bad usage maps to exit code 2 via CLIError.
+		return &output.CLIError{
+			Code: output.CodeBadUsage,
+			Err:  errors.New("--backend is required"),
+		}
 	}
 	key := a.idemKey
 	if key == "" {
@@ -136,6 +140,9 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 	if resp.StatusCode() == http.StatusUnauthorized {
 		return errSessionExpired()
 	}
+	if cerr := problemToError(resp.StatusCode(), envUpProblem(resp)); cerr != nil {
+		return cerr
+	}
 	snap, err := envUpSnapshot(resp)
 	if err != nil {
 		return err
@@ -159,7 +166,9 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 
 // envUpSnapshot maps the POST /v2/env response into the unified EnvSnapshot.
 // 200 = idempotent replay, 202 = newly queued. Both shapes carry the same
-// three required fields.
+// three required fields. Caller has already routed non-2xx responses through
+// problemToError, so the only failure mode here is an unexpected status with
+// no decoded body — surface as a generic CLIError.
 func envUpSnapshot(resp *api.PostV2EnvResponse) (*output.EnvSnapshot, error) {
 	switch {
 	case resp.JSON202 != nil:
@@ -175,11 +184,28 @@ func envUpSnapshot(resp *api.PostV2EnvResponse) (*output.EnvSnapshot, error) {
 			State:     resp.JSON200.State,
 		}, nil
 	}
-	if p := firstProblem(resp.ApplicationproblemJSON400, resp.ApplicationproblemJSON403,
-		resp.ApplicationproblemJSON409, resp.ApplicationproblemJSON429); p != nil {
-		return nil, fmt.Errorf("env up: %s (status %d)", p.Title, p.Status)
+	return nil, &output.CLIError{
+		Code: output.CodeGeneric,
+		Err:  fmt.Errorf("env up: unexpected status %d", resp.StatusCode()),
 	}
-	return nil, fmt.Errorf("env up: unexpected status %d", resp.StatusCode())
+}
+
+// envUpProblem dispatches to the per-status Problem field on PostV2EnvResponse.
+// The codegen produces one ApplicationproblemJSON<status> field per status
+// declared in the spec; problemToError tolerates a nil Problem (falls back to
+// status-only mapping) so undeclared statuses still produce a CLIError.
+func envUpProblem(resp *api.PostV2EnvResponse) *api.Problem {
+	switch resp.StatusCode() {
+	case http.StatusBadRequest:
+		return resp.ApplicationproblemJSON400
+	case http.StatusForbidden:
+		return resp.ApplicationproblemJSON403
+	case http.StatusConflict:
+		return resp.ApplicationproblemJSON409
+	case http.StatusTooManyRequests:
+		return resp.ApplicationproblemJSON429
+	}
+	return nil
 }
 
 // ---- env status ----
@@ -212,15 +238,26 @@ func runEnvStatus(cmd *cobra.Command, f envCommonFlags) error {
 	case http.StatusUnauthorized:
 		return errSessionExpired()
 	case http.StatusNotFound:
-		// Per spec §6.6 a "not-found" maps to exit code 7 — that wiring lands
-		// in Task 7. For now: informational stderr message, exit zero.
-		// TODO(task-7): translate this to a sentinel error so the
-		// exit-code middleware can return 7 here.
+		// Spec §6.6: not-found maps to exit code 7. Keep the informational
+		// stderr line — it's the most actionable signal in a no-env shell —
+		// but return a CLIError so main.go's wrapper sets the exit code.
 		fmt.Fprintln(cmd.ErrOrStderr(), "No environment provisioned.")
-		return nil
+		return &output.CLIError{
+			Code: output.CodeNotFound,
+			Err:  errors.New("no environment provisioned"),
+		}
 	}
 	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
-		return fmt.Errorf("env status: unexpected status %d", resp.StatusCode())
+		// Any other non-2xx routes through problemToError. GET /v2/env's only
+		// declared error body is 404, handled above; for unexpected statuses
+		// the Problem field is nil and WrapHTTP falls back to status-only.
+		if cerr := problemToError(resp.StatusCode(), nil); cerr != nil {
+			return cerr
+		}
+		return &output.CLIError{
+			Code: output.CodeGeneric,
+			Err:  fmt.Errorf("env status: unexpected status %d", resp.StatusCode()),
+		}
 	}
 	snap := &output.EnvSnapshot{
 		EnvId:         derefString(resp.JSON200.EnvId),
@@ -264,10 +301,20 @@ func runEnvCancel(cmd *cobra.Command, f envCommonFlags) error {
 	case http.StatusUnauthorized:
 		return errSessionExpired()
 	}
-	if p := firstProblem(resp.ApplicationproblemJSON404, resp.ApplicationproblemJSON409); p != nil {
-		return fmt.Errorf("env cancel: %s (status %d)", p.Title, p.Status)
+	var p *api.Problem
+	switch resp.StatusCode() {
+	case http.StatusNotFound:
+		p = resp.ApplicationproblemJSON404
+	case http.StatusConflict:
+		p = resp.ApplicationproblemJSON409
 	}
-	return fmt.Errorf("env cancel: unexpected status %d", resp.StatusCode())
+	if cerr := problemToError(resp.StatusCode(), p); cerr != nil {
+		return cerr
+	}
+	return &output.CLIError{
+		Code: output.CodeGeneric,
+		Err:  fmt.Errorf("env cancel: unexpected status %d", resp.StatusCode()),
+	}
 }
 
 // ---- env down ----
@@ -306,10 +353,20 @@ func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 	case http.StatusAccepted:
 		// Fallthrough to wait/render.
 	default:
-		if p := firstProblem(resp.ApplicationproblemJSON404, resp.ApplicationproblemJSON409); p != nil {
-			return fmt.Errorf("env down: %s (status %d)", p.Title, p.Status)
+		var p *api.Problem
+		switch resp.StatusCode() {
+		case http.StatusNotFound:
+			p = resp.ApplicationproblemJSON404
+		case http.StatusConflict:
+			p = resp.ApplicationproblemJSON409
 		}
-		return fmt.Errorf("env down: unexpected status %d", resp.StatusCode())
+		if cerr := problemToError(resp.StatusCode(), p); cerr != nil {
+			return cerr
+		}
+		return &output.CLIError{
+			Code: output.CodeGeneric,
+			Err:  fmt.Errorf("env down: unexpected status %d", resp.StatusCode()),
+		}
 	}
 
 	if !wait {
@@ -353,6 +410,9 @@ func waitForEnvTerminal(cmd *cobra.Command, cli *api.ClientWithResponses) (*outp
 				return "", false, err
 			}
 			if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
+				if cerr := problemToError(resp.StatusCode(), resp.ApplicationproblemJSON404); cerr != nil {
+					return "", false, cerr
+				}
 				return "", false, fmt.Errorf("env status during wait: status %d", resp.StatusCode())
 			}
 			last = &output.EnvSnapshot{
@@ -384,10 +444,16 @@ func waitForEnvTeardown(cmd *cobra.Command, cli *api.ClientWithResponses) (*outp
 				return "", false, err
 			}
 			if resp.StatusCode() == http.StatusNotFound {
+				// Teardown completion: 404 means the env is gone. Don't route
+				// this through problemToError — that would surface a CLIError
+				// when in fact this is the success signal we're polling for.
 				gone = true
 				return "GONE", true, nil
 			}
 			if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
+				if cerr := problemToError(resp.StatusCode(), nil); cerr != nil {
+					return "", false, cerr
+				}
 				return "", false, fmt.Errorf("env status during teardown: status %d", resp.StatusCode())
 			}
 			last = &output.EnvSnapshot{
@@ -434,12 +500,3 @@ func withStatus(opts output.WaitOpts, w io.Writer) output.WaitOpts {
 	return opts
 }
 
-// firstProblem returns the first non-nil problem pointer.
-func firstProblem(ps ...*api.Problem) *api.Problem {
-	for _, p := range ps {
-		if p != nil {
-			return p
-		}
-	}
-	return nil
-}

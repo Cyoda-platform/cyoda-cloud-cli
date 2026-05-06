@@ -125,6 +125,54 @@ func TestEnvUp_RequiresBackend(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--backend is required") {
 		t.Fatalf("err = %v, want --backend required", err)
 	}
+	// Spec §6.6: bad usage maps to exit code 2 via CLIError — parity with
+	// app's "--repo is required" surface.
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err should be *output.CLIError, got %T: %v", err, err)
+	}
+	if cerr.Code != output.CodeBadUsage {
+		t.Errorf("CLIError.Code = %d, want %d (BadUsage)", cerr.Code, output.CodeBadUsage)
+	}
+	if got := output.Exit(err); got != 2 {
+		t.Errorf("Exit = %d, want 2", got)
+	}
+}
+
+// TestEnvUp_TierNotEntitledMapsExitFive covers the 403 path on POST /v2/env.
+// Spec §6.6: a Problem with type slug `tier-not-entitled` must exit 5 — the
+// pre-Task-7 env code surfaced this as plain fmt.Errorf and exited 1, which
+// broke parity with the app subtree.
+func TestEnvUp_TierNotEntitledMapsExitFive(t *testing.T) {
+	envTestSetup(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(problemBody(
+			"tier-not-entitled",
+			"Subscription tier does not allow env up",
+			403,
+		))
+	}))
+	cmd := NewEnvCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	_, _, err := runCmd(t, cmd, context.Background(), "up", "--backend", "x")
+	if err == nil {
+		t.Fatal("expected tier-not-entitled error, got nil")
+	}
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err = %T %v, want *output.CLIError", err, err)
+	}
+	if cerr.Code != output.CodeTierNotEntitled {
+		t.Errorf("Code = %d, want %d (TierNotEntitled)", cerr.Code, output.CodeTierNotEntitled)
+	}
+	if got := output.Exit(err); got != 5 {
+		t.Errorf("Exit = %d, want 5", got)
+	}
+	if !strings.Contains(cerr.Error(), "Subscription tier") {
+		t.Errorf("error message = %q", cerr.Error())
+	}
 }
 
 func TestEnvUp_RejectsShortIdempotencyKey(t *testing.T) {
@@ -282,7 +330,11 @@ func TestEnvStatus_HappyPath(t *testing.T) {
 	}
 }
 
-func TestEnvStatus_NotFoundIsInformational(t *testing.T) {
+// TestEnvStatus_NotFoundMapsExitSeven covers the 404 path on GET /v2/env.
+// Spec §6.6 maps not-found to exit code 7. The CLI keeps the informational
+// stderr line for shell-friendliness but returns a *output.CLIError carrying
+// CodeNotFound so main.go's wrapper sets the documented exit code.
+func TestEnvStatus_NotFoundMapsExitSeven(t *testing.T) {
 	envTestSetup(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/problem+json")
 		w.WriteHeader(http.StatusNotFound)
@@ -293,15 +345,27 @@ func TestEnvStatus_NotFoundIsInformational(t *testing.T) {
 		})
 	}))
 	cmd := NewEnvCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
 	stdout, stderr, err := runCmd(t, cmd, context.Background(), "status")
-	if err != nil {
-		t.Fatalf("env status (404): %v", err)
+	if err == nil {
+		t.Fatal("env status (404): expected CLIError, got nil")
 	}
 	if stdout != "" {
 		t.Errorf("stdout should be empty on 404, got %q", stdout)
 	}
 	if !strings.Contains(stderr, "No environment provisioned") {
 		t.Errorf("stderr missing informational message:\n%s", stderr)
+	}
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err = %T %v, want *output.CLIError", err, err)
+	}
+	if cerr.Code != output.CodeNotFound {
+		t.Errorf("Code = %d, want %d (NotFound)", cerr.Code, output.CodeNotFound)
+	}
+	if got := output.Exit(err); got != 7 {
+		t.Errorf("Exit = %d, want 7", got)
 	}
 }
 
@@ -330,7 +394,7 @@ func TestEnvCancel_PostsCancelEndpoint(t *testing.T) {
 	}
 }
 
-func TestEnvCancel_ConflictMaps(t *testing.T) {
+func TestEnvCancel_ConflictMapsToCLIError(t *testing.T) {
 	envTestSetup(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/problem+json")
 		w.WriteHeader(http.StatusConflict)
@@ -346,6 +410,17 @@ func TestEnvCancel_ConflictMaps(t *testing.T) {
 	_, _, err := runCmd(t, cmd, context.Background(), "cancel")
 	if err == nil || !strings.Contains(err.Error(), "not cancellable") {
 		t.Fatalf("err = %v, want conflict surfaced", err)
+	}
+	// Status-only fallback: about:blank type → codeForStatus(409) = CodeConflict.
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err = %T %v, want *output.CLIError", err, err)
+	}
+	if cerr.Code != output.CodeConflict {
+		t.Errorf("Code = %d, want %d (Conflict)", cerr.Code, output.CodeConflict)
+	}
+	if got := output.Exit(err); got != 8 {
+		t.Errorf("Exit = %d, want 8", got)
 	}
 }
 
@@ -374,7 +449,7 @@ func TestEnvDown_DeletesEndpoint(t *testing.T) {
 	}
 }
 
-func TestEnvDown_409StillDeployed(t *testing.T) {
+func TestEnvDown_ConflictMapsToCLIError(t *testing.T) {
 	envTestSetup(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/problem+json")
 		w.WriteHeader(http.StatusConflict)
@@ -390,6 +465,18 @@ func TestEnvDown_409StillDeployed(t *testing.T) {
 	_, _, err := runCmd(t, cmd, context.Background(), "down")
 	if err == nil || !strings.Contains(err.Error(), "app still deployed") {
 		t.Fatalf("err = %v, want app-still-deployed surfaced", err)
+	}
+	// Spec §6.6: 409 → CodeConflict (exit 8). Pre-Task-7 env down returned a
+	// plain fmt.Errorf and the process exited 1 — parity gap with app delete.
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err = %T %v, want *output.CLIError", err, err)
+	}
+	if cerr.Code != output.CodeConflict {
+		t.Errorf("Code = %d, want %d (Conflict)", cerr.Code, output.CodeConflict)
+	}
+	if got := output.Exit(err); got != 8 {
+		t.Errorf("Exit = %d, want 8", got)
 	}
 }
 
