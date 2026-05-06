@@ -3,8 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 )
@@ -52,6 +54,62 @@ func LoadFile() (File, error) {
 		return File{}, fmt.Errorf("config: parse %s: %w", p, err)
 	}
 	return f, nil
+}
+
+// loadFileWarnOnce ensures `command1 && command2` chains only see one
+// "config unreadable" warning per process even if both commands resolve
+// the same malformed file.
+var (
+	loadFileWarnOnce sync.Once
+	loadFileWarnSink io.Writer = nil // overridden by tests; nil -> os.Stderr
+	loadFileWarnMu   sync.Mutex
+)
+
+// LoadFileWithWarn is LoadFile with a one-shot stderr warning when the
+// underlying file is present but malformed. Callers that need to surface
+// config-resolution failures non-fatally (resolveOrg, resolveOutputJSON,
+// ResolveDiscoveryURL) use this helper so the user gets feedback even when
+// the resolver swallows the error to keep the command running.
+//
+// The warning fires at most once per process via sync.Once so a chain of
+// commands sharing the same broken config doesn't bury the user under N
+// copies of the same line.
+func LoadFileWithWarn(w io.Writer) (File, error) {
+	f, err := LoadFile()
+	if err != nil {
+		loadFileWarnOnce.Do(func() {
+			out := w
+			if out == nil {
+				loadFileWarnMu.Lock()
+				out = loadFileWarnSink
+				loadFileWarnMu.Unlock()
+			}
+			if out == nil {
+				out = os.Stderr
+			}
+			fmt.Fprintf(out, "warning: %s unreadable: %v\n", ConfigFilePath(), err)
+		})
+	}
+	return f, err
+}
+
+// ResetLoadFileWarnOnceForTest re-arms the once-per-process warning so a
+// test process can drive multiple "first malformed-config encounter" paths.
+// Exported for cross-package tests in internal/commands; harmless at runtime.
+func ResetLoadFileWarnOnceForTest() {
+	loadFileWarnMu.Lock()
+	loadFileWarnOnce = sync.Once{}
+	loadFileWarnMu.Unlock()
+}
+
+// SetLoadFileWarnSinkForTest installs a fallback writer used by
+// LoadFileWithWarn when its caller passes nil. Tests use this to capture
+// warnings emitted from code paths they cannot otherwise instrument.
+// Exported for cross-package tests; pass nil to clear.
+func SetLoadFileWarnSinkForTest(w io.Writer) {
+	loadFileWarnMu.Lock()
+	loadFileWarnSink = w
+	loadFileWarnMu.Unlock()
 }
 
 // SaveFile writes f to ConfigFilePath() atomically (tmp + rename, mode 0600),

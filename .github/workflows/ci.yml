@@ -1,5 +1,8 @@
 name: CI
 
+# Action versions pinned to specific minor releases. Update via dependabot or
+# quarterly review.
+
 on:
   push:
     branches: [main]
@@ -10,8 +13,8 @@ jobs:
     name: build & test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-go@v5.2.0
         with:
           go-version: 1.22.x
           cache: true
@@ -24,11 +27,11 @@ jobs:
     name: golangci-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-go@v5.2.0
         with:
           go-version: 1.22.x
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v6.1.1
         with:
           version: latest

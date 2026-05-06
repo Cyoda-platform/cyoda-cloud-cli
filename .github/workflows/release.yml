@@ -1,5 +1,10 @@
 name: release
 
+# Action versions pinned to specific minor releases. Update via dependabot or
+# quarterly review. Pinning a floating major (`@v6`) lets the action's
+# maintainer ship a backwards-compatible-in-name-only change; a specific
+# minor still lets us pull non-breaking patch fixes automatically.
+
 on:
   push:
     tags:
@@ -17,32 +22,32 @@ jobs:
       id-token: write   # OIDC for cosign keyless (only granted on tag-push)
       packages: write   # ghcr push
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.2.0
         with:
           go-version: '1.22.x'
           cache: true
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v3.2.0
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3.8.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v3.3.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@v3.7.0
 
-      - uses: anchore/sbom-action/download-syft@v0
+      - uses: anchore/sbom-action/download-syft@v0.17.8
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v6.1.0
         with:
           version: latest
           args: release --clean

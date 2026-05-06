@@ -1,5 +1,8 @@
 name: openapi-drift
 
+# Action versions pinned to specific minor releases. Update via dependabot or
+# quarterly review.
+
 on:
   schedule:
     - cron: '0 6 * * *'      # 06:00 UTC daily
@@ -18,9 +21,9 @@ jobs:
     name: openapi drift
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.2.0
         with:
           go-version: '1.22.x'
           cache: true

@@ -61,13 +61,15 @@ func Refresh(ctx context.Context, cfg RefreshConfig) (Tokens, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		// Try to decode an Auth0 error object so invalid_grant maps cleanly.
+		// We deliberately drop error_description (F-012): the sentinel itself
+		// is the user-actionable signal, and the Auth0 description text could
+		// theoretically include refresh-token excerpts in some failure modes.
 		var errBody struct {
-			Error            string `json:"error"`
-			ErrorDescription string `json:"error_description"`
+			Error string `json:"error"`
 		}
 		_ = json.Unmarshal(body, &errBody)
 		if errBody.Error == "invalid_grant" {
-			return Tokens{}, fmt.Errorf("refresh: %w: %s", ErrSessionExpired, errBody.ErrorDescription)
+			return Tokens{}, fmt.Errorf("refresh: %w", ErrSessionExpired)
 		}
 		return Tokens{}, fmt.Errorf("refresh: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
