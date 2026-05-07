@@ -872,7 +872,7 @@ GoReleaser on tag push: macOS/Linux/Windows × amd64/arm64; Homebrew tap; Scoop 
    - Token Endpoint Authentication Method: **None**.
    - Grant types: Authorization Code, Refresh Token, Device Code.
    - PKCE required.
-   - Allowed Callback URLs: `http://127.0.0.1` (no port — Auth0 permits any port at runtime). **Not `localhost`** (IPv6 resolution issues).
+   - Allowed Callback URLs: `http://127.0.0.1:42777/callback` (the CLI's `auth.DefaultLoopbackBindAddr`). **Not `localhost`** (IPv6 resolution issues). Auth0 does **not** wildcard ports for loopback URIs despite RFC 8252 §7.3 — the registered URL must match the bound port exactly. Users who can't free port 42777 locally set `CYODA_CLOUD_LOOPBACK_PORT=<port>` and register the matching `http://127.0.0.1:<port>/callback`.
    - Refresh Token Rotation **on**, Reuse Detection **on**, Absolute Lifetime ~30 d, Inactivity Lifetime ~14 d.
    - Connections: **Google** and **GitHub** only.
    - `offline_access` scope allowed.

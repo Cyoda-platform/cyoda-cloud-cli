@@ -3,6 +3,7 @@ package commands
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -10,6 +11,12 @@ import (
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/config"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/keychain"
 )
+
+// envLoopbackPort lets users override the PKCE loopback port when the default
+// (auth.DefaultLoopbackBindAddr) is unavailable. Whatever value is set must be
+// pre-registered on Auth0's Allowed Callback URLs as
+// "http://127.0.0.1:<port>/callback" — Auth0 does not wildcard ports.
+const envLoopbackPort = "CYODA_CLOUD_LOOPBACK_PORT"
 
 // loginOpts captures the resolved options for an interactive login. Both
 // `login` and `register` build one of these and call runLogin — register
@@ -66,6 +73,10 @@ func runLogin(cmd *cobra.Command, opts loginOpts) error {
 		return fmt.Errorf("discovery: %w", err)
 	}
 	ctx := cmd.Context()
+	bindAddr := ""
+	if p := os.Getenv(envLoopbackPort); p != "" {
+		bindAddr = "127.0.0.1:" + p
+	}
 	loCfg := auth.LoopbackConfig{
 		Auth0Domain:  d.Auth0Domain,
 		ClientID:     d.Auth0ClientID,
@@ -73,6 +84,7 @@ func runLogin(cmd *cobra.Command, opts loginOpts) error {
 		Scopes:       opts.Scopes,
 		Organization: opts.Org,
 		SignupHint:   opts.Signup,
+		BindAddr:     bindAddr,
 		Stderr:       cmd.ErrOrStderr(),
 	}
 	var toks auth.Tokens

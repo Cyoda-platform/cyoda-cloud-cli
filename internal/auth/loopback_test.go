@@ -120,6 +120,7 @@ func TestLoginPKCE_HappyPath(t *testing.T) {
 		Audience:    "https://api.cyoda.cloud",
 		Scopes:      []string{"openid", "profile"},
 		OpenBrowser: open,
+		BindAddr:    "127.0.0.1:0", // ephemeral port — avoids fixed-port collision in parallel tests
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -179,6 +180,7 @@ func TestLoginPKCE_StateMismatch(t *testing.T) {
 		Audience:    "aud",
 		Scopes:      []string{"openid"},
 		OpenBrowser: open,
+		BindAddr:    "127.0.0.1:0",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -199,6 +201,7 @@ func TestLoginPKCE_TokenError(t *testing.T) {
 		Audience:    "aud",
 		Scopes:      []string{"openid"},
 		OpenBrowser: open,
+		BindAddr:    "127.0.0.1:0",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -239,6 +242,7 @@ func TestLoginPKCE_ContextCancel(t *testing.T) {
 		Scopes:      []string{"openid"},
 		// OpenBrowser intentionally a no-op so nothing hits /authorize.
 		OpenBrowser: func(string) error { return nil },
+		BindAddr:    "127.0.0.1:0",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
@@ -279,6 +283,7 @@ func TestLoginPKCE_BrowserOpenFailureFallsBack(t *testing.T) {
 		Scopes:      []string{"openid"},
 		OpenBrowser: func(_ string) error { return fmt.Errorf("no display") },
 		Stderr:      &stderr,
+		BindAddr:    "127.0.0.1:0",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()

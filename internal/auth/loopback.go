@@ -29,6 +29,16 @@ type LoopbackConfig struct {
 	Organization string // optional Auth0 organization slug
 	SignupHint   bool   // request screen_hint=signup
 
+	// BindAddr is the host:port the loopback server listens on. Defaults to
+	// DefaultLoopbackBindAddr ("127.0.0.1:42777"). Auth0 does NOT honour port
+	// wildcards in Allowed Callback URLs (despite RFC 8252 §7.3 recommending
+	// it), so the registered URL must match the bound port exactly. Override
+	// via the CYODA_CLOUD_LOOPBACK_PORT env var if 42777 is in use locally;
+	// the corresponding `http://127.0.0.1:<port>/callback` must then be
+	// registered as an Allowed Callback URL. Tests pass "127.0.0.1:0" to let
+	// the OS pick a free port.
+	BindAddr string
+
 	// OpenBrowser, if set, is called with the authorize URL instead of the
 	// platform default. Useful in tests and for headless environments.
 	OpenBrowser func(url string) error
@@ -37,6 +47,12 @@ type LoopbackConfig struct {
 	// is printed when the browser cannot be opened. Defaults to os.Stderr.
 	Stderr io.Writer
 }
+
+// DefaultLoopbackBindAddr is the host:port the PKCE loopback server binds when
+// LoopbackConfig.BindAddr is empty. The corresponding callback URL
+// "http://127.0.0.1:42777/callback" must be registered on the Auth0 native
+// application's Allowed Callback URLs.
+const DefaultLoopbackBindAddr = "127.0.0.1:42777"
 
 // Tokens is the result of a successful authentication.
 type Tokens struct {
@@ -68,9 +84,13 @@ const loginTimeout = 5 * time.Minute
 // configured Auth0 tenant via a 127.0.0.1 loopback redirect. Returns on
 // callback receipt, error, ctx cancellation, or 5-minute timeout.
 func LoginPKCE(ctx context.Context, cfg LoopbackConfig) (Tokens, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	bindAddr := cfg.BindAddr
+	if bindAddr == "" {
+		bindAddr = DefaultLoopbackBindAddr
+	}
+	listener, err := net.Listen("tcp", bindAddr)
 	if err != nil {
-		return Tokens{}, fmt.Errorf("loopback listen: %w", err)
+		return Tokens{}, fmt.Errorf("loopback listen on %s: %w (close any process using this port, or set CYODA_CLOUD_LOOPBACK_PORT to override — and register the matching http://127.0.0.1:<port>/callback in Auth0)", bindAddr, err)
 	}
 	defer listener.Close()
 
