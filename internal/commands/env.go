@@ -11,11 +11,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/api"
+	"github.com/cyoda-platform/cyoda-cloud-cli/internal/envname"
 	"github.com/cyoda-platform/cyoda-cloud-cli/internal/output"
 )
 
 // minIdempotencyKeyLen mirrors the OpenAPI minLength constraint on the
-// Idempotency-Key header (see openapi.yaml /v2/env POST). UUIDv4 trivially
+// Idempotency-Key header (see openapi.yaml /v2/envs POST). UUIDv4 trivially
 // satisfies it; we re-check here so a user-supplied key fails fast in the CLI
 // rather than at the server.
 const minIdempotencyKeyLen = 16
@@ -38,13 +39,14 @@ type envCommonFlags struct {
 }
 
 // NewEnvCmd returns the `cyoda-cloud env` parent command. Subcommands are
-// up / status / cancel / down per spec §6.4.
+// up / list / status / cancel / down per spec §6.4.
 func NewEnvCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "env",
-		Short: "Provision and manage the org's environment",
+		Short: "Provision and manage envs for the caller's org",
 	}
 	cmd.AddCommand(newEnvUpCmd())
+	cmd.AddCommand(newEnvListCmd())
 	cmd.AddCommand(newEnvStatusCmd())
 	cmd.AddCommand(newEnvCancelCmd())
 	cmd.AddCommand(newEnvDownCmd())
@@ -55,21 +57,25 @@ func NewEnvCmd() *cobra.Command {
 
 func newEnvUpCmd() *cobra.Command {
 	var (
-		f         envCommonFlags
-		backend   string
-		chatID    string
-		idemKey   string
-		wait      bool
+		f                envCommonFlags
+		backend          string
+		chatID           string
+		idemKey          string
+		wait             bool
+		m2mWithAdminRole bool
 	)
 	cmd := &cobra.Command{
-		Use:   "up",
-		Short: "Provision the env for caller's org",
+		Use:   "up <name>",
+		Short: "Provision a named env for caller's org",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEnvUp(cmd, f, envUpArgs{
-				backend: backend,
-				chatID:  chatID,
-				idemKey: idemKey,
-				wait:    wait,
+				name:             args[0],
+				backend:          backend,
+				chatID:           chatID,
+				idemKey:          idemKey,
+				wait:             wait,
+				m2mWithAdminRole: m2mWithAdminRole,
 			})
 		},
 	}
@@ -80,23 +86,30 @@ func newEnvUpCmd() *cobra.Command {
 	cmd.Flags().StringVar(&idemKey, "idempotency-key", "",
 		"Idempotency-Key header (default: random UUIDv4). Min 16 chars.")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until env reaches a terminal state")
+	cmd.Flags().BoolVar(&m2mWithAdminRole, "m2m-with-admin-role", false,
+		"Request that the bootstrap-minted M2M client also receive ADMIN on the env")
 	return cmd
 }
 
 type envUpArgs struct {
-	backend string
-	chatID  string
-	idemKey string
-	wait    bool
+	name             string
+	backend          string
+	chatID           string
+	idemKey          string
+	wait             bool
+	m2mWithAdminRole bool
 }
 
 func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 	f.org = resolveOrg(cmd, f.org)
 	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
+
+	// Best-effort client-side env-name validation. Server is authoritative;
+	// fail fast here to spare a network round trip on obvious mistakes.
+	if err := envname.Validate(a.name); err != nil {
+		return &output.CLIError{Code: output.CodeBadUsage, Err: err}
+	}
 	if a.backend == "" {
-		// Spec says backend is required. Don't hardcode a default — surface
-		// a clear error so the user (or shell completion) supplies one.
-		// Spec §6.6: bad usage maps to exit code 2 via CLIError.
 		return &output.CLIError{
 			Code: output.CodeBadUsage,
 			Err:  errors.New("--backend is required"),
@@ -119,12 +132,19 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 	}
 	cli := b.Client
 
-	body := api.PostV2EnvJSONRequestBody{Backend: a.backend}
+	body := api.ProvisionEnvJSONRequestBody{
+		EnvName: a.name,
+		Backend: a.backend,
+	}
 	if a.chatID != "" {
 		body.ChatId = &a.chatID
 	}
-	resp, err := cli.PostV2EnvWithResponse(ctx,
-		&api.PostV2EnvParams{IdempotencyKey: key},
+	if a.m2mWithAdminRole {
+		t := true
+		body.M2mWithAdminRole = &t
+	}
+	resp, err := cli.ProvisionEnvWithResponse(ctx,
+		&api.ProvisionEnvParams{IdempotencyKey: key},
 		body,
 	)
 	if err != nil {
@@ -133,7 +153,7 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 	if resp.StatusCode() == http.StatusUnauthorized {
 		return errSessionExpired()
 	}
-	if cerr := problemToError(resp.StatusCode(), envUpProblem(resp)); cerr != nil {
+	if cerr := envUpErrorFromResponse(resp); cerr != nil {
 		return cerr
 	}
 	snap, err := envUpSnapshot(resp)
@@ -143,10 +163,10 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 
 	if a.wait {
 		// Short-circuit when the initial response is already terminal — e.g.
-		// an idempotent replay returning 200 with state=SUCCESS. There's
+		// an idempotent replay returning 200 with state=Ready. There's
 		// nothing to poll for and the user shouldn't see "still …" lines.
 		if !output.IsTerminalState(snap.State) {
-			final, err := waitForEnvTerminal(cmd, cli)
+			final, err := waitForEnvTerminal(cmd, cli, a.name)
 			if err != nil {
 				return err
 			}
@@ -157,25 +177,17 @@ func runEnvUp(cmd *cobra.Command, f envCommonFlags, a envUpArgs) error {
 	return renderEnv(cmd, f.asJSON, snap)
 }
 
-// envUpSnapshot maps the POST /v2/env response into the unified EnvSnapshot.
-// 200 = idempotent replay, 202 = newly queued. Both shapes carry the same
-// three required fields. Caller has already routed non-2xx responses through
-// problemToError, so the only failure mode here is an unexpected status with
-// no decoded body — surface as a generic CLIError.
-func envUpSnapshot(resp *api.PostV2EnvResponse) (*output.EnvSnapshot, error) {
+// envUpSnapshot maps the POST /v2/envs response into the unified EnvSnapshot.
+// 200 = idempotent replay, 202 = newly queued. Both shapes carry an EnvDetail.
+// Caller has already routed non-2xx responses through envUpErrorFromResponse,
+// so the only failure mode here is an unexpected status with no decoded body —
+// surface as a generic CLIError.
+func envUpSnapshot(resp *api.ProvisionEnvResponse) (*output.EnvSnapshot, error) {
 	switch {
 	case resp.JSON202 != nil:
-		return &output.EnvSnapshot{
-			EnvId:     resp.JSON202.EnvId,
-			Namespace: resp.JSON202.Namespace,
-			State:     resp.JSON202.State,
-		}, nil
+		return envSnapshotFromDetail(resp.JSON202), nil
 	case resp.JSON200 != nil:
-		return &output.EnvSnapshot{
-			EnvId:     resp.JSON200.EnvId,
-			Namespace: resp.JSON200.Namespace,
-			State:     resp.JSON200.State,
-		}, nil
+		return envSnapshotFromDetail(resp.JSON200), nil
 	}
 	return nil, &output.CLIError{
 		Code: output.CodeGeneric,
@@ -183,22 +195,125 @@ func envUpSnapshot(resp *api.PostV2EnvResponse) (*output.EnvSnapshot, error) {
 	}
 }
 
-// envUpProblem dispatches to the per-status Problem field on PostV2EnvResponse.
-// The codegen produces one ApplicationproblemJSON<status> field per status
-// declared in the spec; problemToError tolerates a nil Problem (falls back to
-// status-only mapping) so undeclared statuses still produce a CLIError.
-func envUpProblem(resp *api.PostV2EnvResponse) *api.Problem {
-	switch resp.StatusCode() {
-	case http.StatusBadRequest:
-		return resp.ApplicationproblemJSON400
-	case http.StatusForbidden:
-		return resp.ApplicationproblemJSON403
-	case http.StatusConflict:
-		return resp.ApplicationproblemJSON409
-	case http.StatusTooManyRequests:
-		return resp.ApplicationproblemJSON429
+// envUpErrorFromResponse maps the per-status Problem field on
+// ProvisionEnvResponse to a CLIError. The 409 path carries the specialised
+// EnvAlreadyExistsProblem (which differs structurally from Problem only in
+// the optional env_id extension) — we collapse it to a generic Problem so the
+// existing problemToError plumbing handles the exit-code mapping. Both
+// idempotency-conflict and env-already-exists map to CodeConflict per spec
+// §6.6, so the collapse is lossless for exit-code purposes.
+//
+// A future task could surface result.LeaderIdemKey's env_id back to the user
+// (e.g. "env 'dev' already exists at <env_id>") — left as a follow-up.
+func envUpErrorFromResponse(resp *api.ProvisionEnvResponse) error {
+	status := resp.StatusCode()
+	if status >= 200 && status < 300 {
+		return nil
 	}
-	return nil
+	var p *api.Problem
+	switch status {
+	case http.StatusBadRequest:
+		p = resp.ApplicationproblemJSON400
+	case http.StatusForbidden:
+		p = resp.ApplicationproblemJSON403
+	case http.StatusConflict:
+		if eae := resp.ApplicationproblemJSON409; eae != nil {
+			p = problemFromEnvAlreadyExists(eae)
+		}
+	case http.StatusTooManyRequests:
+		p = resp.ApplicationproblemJSON429
+	}
+	return problemToError(status, p)
+}
+
+// problemFromEnvAlreadyExists collapses the specialised 409 shape into the
+// generic Problem the exit-code mapper consumes. Title/Status/Detail/Type are
+// the only fields the mapper reads, so dropping the env_id extension here is
+// safe for now.
+func problemFromEnvAlreadyExists(eae *api.EnvAlreadyExistsProblem) *api.Problem {
+	if eae == nil {
+		return nil
+	}
+	out := &api.Problem{}
+	if eae.Type != nil {
+		out.Type = *eae.Type
+	}
+	if eae.Title != nil {
+		out.Title = *eae.Title
+	}
+	if eae.Status != nil {
+		out.Status = *eae.Status
+	}
+	out.Detail = eae.Detail
+	return out
+}
+
+// ---- env list ----
+
+func newEnvListCmd() *cobra.Command {
+	var (
+		f               envCommonFlags
+		includeTerminal bool
+	)
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List envs for caller's org",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runEnvList(cmd, f, includeTerminal)
+		},
+	}
+	cmd.Flags().StringVar(&f.org, "org", "", "Auth0 organization slug")
+	cmd.Flags().BoolVar(&f.asJSON, "output-json", false, "JSON output")
+	cmd.Flags().BoolVar(&includeTerminal, "include-terminal", false,
+		"Include envs in terminal states (torn down, failed)")
+	return cmd
+}
+
+func runEnvList(cmd *cobra.Command, f envCommonFlags, includeTerminal bool) error {
+	f.org = resolveOrg(cmd, f.org)
+	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
+
+	ctx := cmd.Context()
+	b, err := BuildAPIClient(cmd, f.org)
+	if err != nil {
+		return err
+	}
+	cli := b.Client
+
+	params := &api.ListEnvsParams{}
+	if includeTerminal {
+		t := true
+		params.IncludeTerminal = &t
+	}
+	resp, err := cli.ListEnvsWithResponse(ctx, params)
+	if err != nil {
+		return mapTransportError(fmt.Errorf("env list: %w", err))
+	}
+	if resp.StatusCode() == http.StatusUnauthorized {
+		return errSessionExpired()
+	}
+	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
+		if cerr := problemToError(resp.StatusCode(), nil); cerr != nil {
+			return cerr
+		}
+		return &output.CLIError{
+			Code: output.CodeGeneric,
+			Err:  fmt.Errorf("env list: unexpected status %d", resp.StatusCode()),
+		}
+	}
+
+	envs := envSnapshotsFromList(*resp.JSON200)
+	stdout := cmd.OutOrStdout()
+	if f.asJSON || !stdoutIsTerminal() {
+		// JSON consumers see the array directly (parses cleanly into []EnvSnapshot).
+		return output.JSON(stdout, envs)
+	}
+	if len(envs) == 0 {
+		fmt.Fprintln(cmd.ErrOrStderr(), "no envs")
+		return nil
+	}
+	return output.EnvListTable(stdout, envs)
 }
 
 // ---- env status ----
@@ -206,10 +321,20 @@ func envUpProblem(resp *api.PostV2EnvResponse) *api.Problem {
 func newEnvStatusCmd() *cobra.Command {
 	var f envCommonFlags
 	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Print current env state for caller's org",
+		Use:   "status <name>",
+		Short: "Print state for a named env",
+		// Implement the no-arg case ourselves so the error message can hint at
+		// `env list` per spec §6.4.
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEnvStatus(cmd, f)
+			if len(args) == 0 {
+				return &output.CLIError{
+					Code: output.CodeBadUsage,
+					Err: errors.New(
+						"env status requires a name. Run 'cyoda-cloud env list' to see available envs."),
+				}
+			}
+			return runEnvStatus(cmd, f, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&f.org, "org", "", "Auth0 organization slug")
@@ -217,16 +342,21 @@ func newEnvStatusCmd() *cobra.Command {
 	return cmd
 }
 
-func runEnvStatus(cmd *cobra.Command, f envCommonFlags) error {
+func runEnvStatus(cmd *cobra.Command, f envCommonFlags, name string) error {
 	f.org = resolveOrg(cmd, f.org)
 	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
+
+	if err := envname.Validate(name); err != nil {
+		return &output.CLIError{Code: output.CodeBadUsage, Err: err}
+	}
+
 	ctx := cmd.Context()
 	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}
 	cli := b.Client
-	resp, err := cli.GetV2EnvWithResponse(ctx)
+	resp, err := cli.GetEnvWithResponse(ctx, name)
 	if err != nil {
 		return mapTransportError(fmt.Errorf("env status: %w", err))
 	}
@@ -234,19 +364,13 @@ func runEnvStatus(cmd *cobra.Command, f envCommonFlags) error {
 	case http.StatusUnauthorized:
 		return errSessionExpired()
 	case http.StatusNotFound:
-		// Spec §6.6: not-found maps to exit code 7. Keep the informational
-		// stderr line — it's the most actionable signal in a no-env shell —
-		// but return a CLIError so main.go's wrapper sets the exit code.
-		fmt.Fprintln(cmd.ErrOrStderr(), "No environment provisioned.")
+		// Spec §6.6: not-found maps to exit code 7.
 		return &output.CLIError{
 			Code: output.CodeNotFound,
-			Err:  errors.New("no environment provisioned"),
+			Err:  fmt.Errorf("env %q not found", name),
 		}
 	}
 	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
-		// Any other non-2xx routes through problemToError. GET /v2/env's only
-		// declared error body is 404, handled above; for unexpected statuses
-		// the Problem field is nil and WrapHTTP falls back to status-only.
 		if cerr := problemToError(resp.StatusCode(), nil); cerr != nil {
 			return cerr
 		}
@@ -255,13 +379,7 @@ func runEnvStatus(cmd *cobra.Command, f envCommonFlags) error {
 			Err:  fmt.Errorf("env status: unexpected status %d", resp.StatusCode()),
 		}
 	}
-	snap := &output.EnvSnapshot{
-		EnvId:         derefString(resp.JSON200.EnvId),
-		Namespace:     derefString(resp.JSON200.Namespace),
-		State:         derefString(resp.JSON200.State),
-		JobStatus:     derefString(resp.JSON200.JobStatus),
-		JobStatusText: derefString(resp.JSON200.JobStatusText),
-	}
+	snap := envSnapshotFromDetail(resp.JSON200)
 	return renderEnv(cmd, f.asJSON, snap)
 }
 
@@ -270,31 +388,37 @@ func runEnvStatus(cmd *cobra.Command, f envCommonFlags) error {
 func newEnvCancelCmd() *cobra.Command {
 	var f envCommonFlags
 	cmd := &cobra.Command{
-		Use:   "cancel",
+		Use:   "cancel <name>",
 		Short: "Cancel an in-flight env operation",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEnvCancel(cmd, f)
+			return runEnvCancel(cmd, f, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&f.org, "org", "", "Auth0 organization slug")
 	return cmd
 }
 
-func runEnvCancel(cmd *cobra.Command, f envCommonFlags) error {
+func runEnvCancel(cmd *cobra.Command, f envCommonFlags, name string) error {
 	f.org = resolveOrg(cmd, f.org)
+
+	if err := envname.Validate(name); err != nil {
+		return &output.CLIError{Code: output.CodeBadUsage, Err: err}
+	}
+
 	ctx := cmd.Context()
 	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}
 	cli := b.Client
-	resp, err := cli.PostV2EnvCancelWithResponse(ctx)
+	resp, err := cli.CancelEnvWithResponse(ctx, name)
 	if err != nil {
 		return mapTransportError(fmt.Errorf("env cancel: %w", err))
 	}
 	switch resp.StatusCode() {
 	case http.StatusAccepted:
-		fmt.Fprintln(cmd.ErrOrStderr(), "env cancellation queued.")
+		fmt.Fprintf(cmd.ErrOrStderr(), "env cancellation queued for %s.\n", name)
 		return nil
 	case http.StatusUnauthorized:
 		return errSessionExpired()
@@ -323,10 +447,11 @@ func newEnvDownCmd() *cobra.Command {
 		wait bool
 	)
 	cmd := &cobra.Command{
-		Use:   "down",
-		Short: "Tear down provisioned env",
+		Use:   "down <name>",
+		Short: "Tear down a named env",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEnvDown(cmd, f, wait)
+			return runEnvDown(cmd, f, args[0], wait)
 		},
 	}
 	cmd.Flags().StringVar(&f.org, "org", "", "Auth0 organization slug")
@@ -335,16 +460,21 @@ func newEnvDownCmd() *cobra.Command {
 	return cmd
 }
 
-func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
+func runEnvDown(cmd *cobra.Command, f envCommonFlags, name string, wait bool) error {
 	f.org = resolveOrg(cmd, f.org)
 	f.asJSON = resolveOutputJSON(cmd, f.asJSON)
+
+	if err := envname.Validate(name); err != nil {
+		return &output.CLIError{Code: output.CodeBadUsage, Err: err}
+	}
+
 	ctx := cmd.Context()
 	b, err := BuildAPIClient(cmd, f.org)
 	if err != nil {
 		return err
 	}
 	cli := b.Client
-	resp, err := cli.DeleteV2EnvWithResponse(ctx)
+	resp, err := cli.DeleteEnvWithResponse(ctx, name)
 	if err != nil {
 		return mapTransportError(fmt.Errorf("env down: %w", err))
 	}
@@ -355,11 +485,8 @@ func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 		// Fallthrough to wait/render.
 	default:
 		var p *api.Problem
-		switch resp.StatusCode() {
-		case http.StatusNotFound:
+		if resp.StatusCode() == http.StatusNotFound {
 			p = resp.ApplicationproblemJSON404
-		case http.StatusConflict:
-			p = resp.ApplicationproblemJSON409
 		}
 		if cerr := problemToError(resp.StatusCode(), p); cerr != nil {
 			return cerr
@@ -371,24 +498,18 @@ func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 	}
 
 	if !wait {
-		fmt.Fprintln(cmd.ErrOrStderr(), "env teardown queued.")
+		fmt.Fprintf(cmd.ErrOrStderr(), "env teardown queued for %s.\n", name)
 		return nil
 	}
 
-	// Poll GET /v2/env until 404 (gone) or — in principle — a terminal env
-	// state. With IsTerminalState narrowed to SUCCESS/FAILED/CANCELLED
-	// (spec §4.3 vocabulary), the 404 path is the primary signal for
-	// teardown completion: the server typically transitions through
-	// non-terminal states like DELETING and then removes the resource.
-	// A future server version that emits an explicit terminal state on
-	// teardown will be picked up only when added to IsTerminalState.
-	if _, err := waitForEnvTeardown(cmd, cli); err != nil {
+	// Poll GET /v2/envs/{name} until 404 (gone) or a terminal state. The
+	// teardown vocabulary on the new server includes Env_Torn_Down as a
+	// terminal state in addition to the legacy SUCCESS/FAILED/CANCELLED set
+	// — see output.IsTerminalState.
+	if _, err := waitForEnvTeardown(cmd, cli, name); err != nil {
 		return err
 	}
-	// Both exit paths (404 gone, or terminal state observed) are success.
-	// Don't render the snapshot — the env is torn down so any remembered
-	// state is stale and unhelpful.
-	fmt.Fprintln(cmd.ErrOrStderr(), "env torn down.")
+	fmt.Fprintf(cmd.ErrOrStderr(), "env %s torn down.\n", name)
 	if f.asJSON {
 		return output.JSON(cmd.OutOrStdout(), map[string]string{"status": "torn_down"})
 	}
@@ -397,16 +518,13 @@ func runEnvDown(cmd *cobra.Command, f envCommonFlags, wait bool) error {
 
 // ---- shared helpers ----
 
-// waitForEnvTerminal polls GET /v2/env until the env reports a terminal state.
-// Used by env up --wait.
-func waitForEnvTerminal(cmd *cobra.Command, cli *api.ClientWithResponses) (*output.EnvSnapshot, error) {
+// waitForEnvTerminal polls GET /v2/envs/{name} until the env reports a
+// terminal state. Used by env up --wait.
+func waitForEnvTerminal(cmd *cobra.Command, cli *api.ClientWithResponses, name string) (*output.EnvSnapshot, error) {
 	var last *output.EnvSnapshot
-	// The closure updates `last` on every successful poll and `last.State` is
-	// the canonical post-loop value, so the state returned by PollUntilTerminal
-	// is redundant here.
 	_, err := output.PollUntilTerminal(cmd.Context(),
 		func(ctx context.Context) (string, bool, error) {
-			resp, err := cli.GetV2EnvWithResponse(ctx)
+			resp, err := cli.GetEnvWithResponse(ctx, name)
 			if err != nil {
 				return "", false, err
 			}
@@ -416,13 +534,7 @@ func waitForEnvTerminal(cmd *cobra.Command, cli *api.ClientWithResponses) (*outp
 				}
 				return "", false, fmt.Errorf("env status during wait: status %d", resp.StatusCode())
 			}
-			last = &output.EnvSnapshot{
-				EnvId:         derefString(resp.JSON200.EnvId),
-				Namespace:     derefString(resp.JSON200.Namespace),
-				State:         derefString(resp.JSON200.State),
-				JobStatus:     derefString(resp.JSON200.JobStatus),
-				JobStatusText: derefString(resp.JSON200.JobStatusText),
-			}
+			last = envSnapshotFromDetail(resp.JSON200)
 			return last.State, output.IsTerminalState(last.State), nil
 		},
 		withStatus(defaultWaitOpts(), cmd.ErrOrStderr()),
@@ -433,21 +545,19 @@ func waitForEnvTerminal(cmd *cobra.Command, cli *api.ClientWithResponses) (*outp
 	return last, nil
 }
 
-// waitForEnvTeardown polls GET /v2/env until 404 (env gone) or a terminal
-// state on the env entity. Returns nil snapshot when 404 was observed.
-func waitForEnvTeardown(cmd *cobra.Command, cli *api.ClientWithResponses) (*output.EnvSnapshot, error) {
+// waitForEnvTeardown polls GET /v2/envs/{name} until 404 (env gone) or a
+// terminal state on the env entity. Returns nil snapshot when 404 was
+// observed.
+func waitForEnvTeardown(cmd *cobra.Command, cli *api.ClientWithResponses, name string) (*output.EnvSnapshot, error) {
 	var last *output.EnvSnapshot
 	gone := false
 	_, err := output.PollUntilTerminal(cmd.Context(),
 		func(ctx context.Context) (string, bool, error) {
-			resp, err := cli.GetV2EnvWithResponse(ctx)
+			resp, err := cli.GetEnvWithResponse(ctx, name)
 			if err != nil {
 				return "", false, err
 			}
 			if resp.StatusCode() == http.StatusNotFound {
-				// Teardown completion: 404 means the env is gone. Don't route
-				// this through problemToError — that would surface a CLIError
-				// when in fact this is the success signal we're polling for.
 				gone = true
 				return "GONE", true, nil
 			}
@@ -457,13 +567,7 @@ func waitForEnvTeardown(cmd *cobra.Command, cli *api.ClientWithResponses) (*outp
 				}
 				return "", false, fmt.Errorf("env status during teardown: status %d", resp.StatusCode())
 			}
-			last = &output.EnvSnapshot{
-				EnvId:         derefString(resp.JSON200.EnvId),
-				Namespace:     derefString(resp.JSON200.Namespace),
-				State:         derefString(resp.JSON200.State),
-				JobStatus:     derefString(resp.JSON200.JobStatus),
-				JobStatusText: derefString(resp.JSON200.JobStatusText),
-			}
+			last = envSnapshotFromDetail(resp.JSON200)
 			return last.State, output.IsTerminalState(last.State), nil
 		},
 		withStatus(defaultWaitOpts(), cmd.ErrOrStderr()),
@@ -487,6 +591,56 @@ func renderEnv(cmd *cobra.Command, asJSON bool, snap *output.EnvSnapshot) error 
 	return output.EnvTable(stdout, snap)
 }
 
+// envSnapshotFromDetail maps an *api.EnvDetail to the unified EnvSnapshot
+// shape rendered by output.EnvTable. The codegen makes most fields
+// pointer-typed (because the spec doesn't declare them required); we collapse
+// nils to empty strings so the renderer stays uniform.
+func envSnapshotFromDetail(d *api.EnvDetail) *output.EnvSnapshot {
+	if d == nil {
+		return &output.EnvSnapshot{}
+	}
+	snap := &output.EnvSnapshot{
+		EnvName:      derefString(d.EnvName),
+		Namespace:    derefString(d.Namespace),
+		AppNamespace: derefString(d.AppNamespace),
+		CyodaEnvURL:  derefString(d.CyodaEnvUrl),
+		M2MClientID:  derefString(d.M2mClientId),
+		State:        derefString(d.State),
+		BuildID:      derefString(d.BuildId),
+	}
+	if d.EnvId != nil {
+		snap.EnvID = d.EnvId.String()
+	}
+	if d.CreationDate != nil {
+		snap.CreationDate = d.CreationDate.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	return snap
+}
+
+// envSnapshotsFromList maps an EnvList (slice of EnvSummary) to a slice of
+// snapshots suitable for table or JSON rendering. Summary lacks the detail-
+// only fields (app_namespace, cyoda_env_url, m2m_client_id, build_id), which
+// stay zero — the table omits them in summary mode.
+func envSnapshotsFromList(list api.EnvList) []output.EnvSnapshot {
+	out := make([]output.EnvSnapshot, 0, len(list))
+	for i := range list {
+		s := list[i]
+		snap := output.EnvSnapshot{
+			EnvName:   derefString(s.EnvName),
+			Namespace: derefString(s.Namespace),
+			State:     derefString(s.State),
+		}
+		if s.EnvId != nil {
+			snap.EnvID = s.EnvId.String()
+		}
+		if s.CreationDate != nil {
+			snap.CreationDate = s.CreationDate.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		out = append(out, snap)
+	}
+	return out
+}
+
 func derefString(p *string) string {
 	if p == nil {
 		return ""
@@ -500,4 +654,3 @@ func withStatus(opts output.WaitOpts, w io.Writer) output.WaitOpts {
 	opts.Status = w
 	return opts
 }
-

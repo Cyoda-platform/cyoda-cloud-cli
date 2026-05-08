@@ -32,43 +32,77 @@ func JSON(w io.Writer, v any) error {
 	return enc.Encode(v)
 }
 
-// EnvSnapshot is the unified-shape for env-table rendering. It abstracts over
-// the different generated response structs (POST returns required fields,
-// GET returns pointer fields) so callers don't have to special-case each.
-//
-// JSON tags mirror the OpenAPI snake_case names so --output-json round-trips
-// the API's own field naming (spec §6.5). Optional fields use ,omitempty so
-// the POST-response shape (which lacks job_status / job_status_text) does not
-// emit empty strings.
+// EnvSnapshot is the unified shape for env rendering across both list and
+// detail views. JSON tags mirror the OpenAPI EnvDetail/EnvSummary snake_case
+// names so --output-json round-trips the API's own field naming
+// (spec §6.5). Detail-only fields (AppNamespace, CyodaEnvURL, M2MClientID,
+// BuildID, JobStatus, JobStatusText) use ,omitempty so the summary-list
+// shape doesn't emit empty strings.
 type EnvSnapshot struct {
-	EnvId         string `json:"env_id"`
-	Namespace     string `json:"namespace"`
+	EnvID         string `json:"env_id,omitempty"`
+	EnvName       string `json:"env_name,omitempty"`
+	Namespace     string `json:"namespace,omitempty"`
+	AppNamespace  string `json:"app_namespace,omitempty"`
+	CyodaEnvURL   string `json:"cyoda_env_url,omitempty"`
+	M2MClientID   string `json:"m2m_client_id,omitempty"`
 	State         string `json:"state"`
 	JobStatus     string `json:"job_status,omitempty"`
 	JobStatusText string `json:"job_status_text,omitempty"`
+	CreationDate  string `json:"creation_date,omitempty"`
+	BuildID       string `json:"build_id,omitempty"`
 }
 
 // EnvTable renders an EnvSnapshot as a human-readable two-column table.
-// Empty optional fields (JobStatus, JobStatusText) are omitted so we don't
-// print blank rows for the POST-response shape.
+// Empty optional fields are omitted so a summary-shape snapshot
+// (env_name + namespace + state only) doesn't emit blank rows for fields
+// that only exist on the detail shape.
 func EnvTable(w io.Writer, e *EnvSnapshot) error {
 	if e == nil {
 		return errors.New("output: EnvTable: nil EnvSnapshot")
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	rows := [][2]string{
-		{"ENV_ID", e.EnvId},
-		{"NAMESPACE", e.Namespace},
-		{"STATE", e.State},
+	rows := [][2]string{}
+	addOpt := func(k, v string) {
+		if v != "" {
+			rows = append(rows, [2]string{k, v})
+		}
 	}
-	if e.JobStatus != "" {
-		rows = append(rows, [2]string{"JOB_STATUS", e.JobStatus})
-	}
-	if e.JobStatusText != "" {
-		rows = append(rows, [2]string{"JOB_STATUS_TEXT", e.JobStatusText})
-	}
+	// Order: identity, namespaces, URL, state, job state, timestamps.
+	addOpt("ENV_NAME", e.EnvName)
+	addOpt("ENV_ID", e.EnvID)
+	addOpt("NAMESPACE", e.Namespace)
+	addOpt("APP_NAMESPACE", e.AppNamespace)
+	addOpt("CYODA_ENV_URL", e.CyodaEnvURL)
+	addOpt("M2M_CLIENT_ID", e.M2MClientID)
+	rows = append(rows, [2]string{"STATE", e.State})
+	addOpt("JOB_STATUS", e.JobStatus)
+	addOpt("JOB_STATUS_TEXT", e.JobStatusText)
+	addOpt("CREATION_DATE", e.CreationDate)
+	addOpt("BUILD_ID", e.BuildID)
 	for _, r := range rows {
 		if _, err := fmt.Fprintf(tw, "%s\t%s\n", r[0], r[1]); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
+}
+
+// EnvListTable renders a slice of EnvSnapshots as a tabular list view with
+// columns ENV_NAME / STATE / NAMESPACE / CREATION_DATE. The list is sorted
+// by ENV_NAME for stable output across runs (server orders by creation_date
+// desc, but the CLI surfaces the alphabetical view because list output is
+// typically grepped/eyeballed by name).
+func EnvListTable(w io.Writer, envs []EnvSnapshot) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(tw, "ENV_NAME\tSTATE\tNAMESPACE\tCREATION_DATE"); err != nil {
+		return err
+	}
+	sorted := make([]EnvSnapshot, len(envs))
+	copy(sorted, envs)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].EnvName < sorted[j].EnvName })
+	for _, e := range sorted {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+			e.EnvName, e.State, e.Namespace, e.CreationDate); err != nil {
 			return err
 		}
 	}
