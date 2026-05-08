@@ -1,0 +1,35 @@
+version: "2"
+
+# Default linter set is conservative (errcheck, govet, ineffassign,
+# staticcheck, unused). Tweaks below trim CLI-idiom noise.
+linters:
+  settings:
+    errcheck:
+      # Exclude well-known idioms where the error has no meaningful
+      # recovery in CLI code:
+      #   - fmt.Fprintf/Fprintln to user-controlled writers (stderr,
+      #     debug log writers, cobra cmd writers): write-failed-to-tty
+      #     is rare and unactionable.
+      #   - defer Close() on read-only resources (response bodies,
+      #     listeners, files opened for reading).
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (net.Listener).Close
+    staticcheck:
+      checks:
+        - all
+        # ST1005 — "error strings should not end with punctuation or
+        # newlines". The advice targets internal/programmatic errors
+        # that get wrapped (`fmt.Errorf("X: %w", err)` → trailing-period
+        # awkwardness). Our CLIError messages are terminal: cobra prints
+        # them with an "Error: " prefix and they never get wrapped.
+        # Trailing-period prose reads correctly to users; spec §6.3
+        # explicitly uses periods on those strings.
+        - "-ST1005"
+        # QF* — quickfix suggestions, not real lint findings. The De
+        # Morgan rewrites this surfaces in env_test.go would actively
+        # harm readability. Disable wholesale.
+        - "-QF*"
