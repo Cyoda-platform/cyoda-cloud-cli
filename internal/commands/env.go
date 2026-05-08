@@ -203,8 +203,9 @@ func envUpSnapshot(resp *api.ProvisionEnvResponse) (*output.EnvSnapshot, error) 
 // idempotency-conflict and env-already-exists map to CodeConflict per spec
 // §6.6, so the collapse is lossless for exit-code purposes.
 //
-// A future task could surface result.LeaderIdemKey's env_id back to the user
-// (e.g. "env 'dev' already exists at <env_id>") — left as a follow-up.
+// The leader's env_id (when present) is appended to the Problem detail so
+// the user can run `cyoda-cloud env status <name>` against the existing env
+// or attach the id to a support ticket without re-running with --output-json.
 func envUpErrorFromResponse(resp *api.ProvisionEnvResponse) error {
 	status := resp.StatusCode()
 	if status >= 200 && status < 300 {
@@ -227,9 +228,10 @@ func envUpErrorFromResponse(resp *api.ProvisionEnvResponse) error {
 }
 
 // problemFromEnvAlreadyExists collapses the specialised 409 shape into the
-// generic Problem the exit-code mapper consumes. Title/Status/Detail/Type are
-// the only fields the mapper reads, so dropping the env_id extension here is
-// safe for now.
+// generic Problem the exit-code mapper consumes. Title/Status/Type pass
+// through; the env_id extension is preserved by appending it to Detail so
+// the user-facing error names the leader env_id without requiring a
+// separate --output-json round-trip.
 func problemFromEnvAlreadyExists(eae *api.EnvAlreadyExistsProblem) *api.Problem {
 	if eae == nil {
 		return nil
@@ -244,7 +246,19 @@ func problemFromEnvAlreadyExists(eae *api.EnvAlreadyExistsProblem) *api.Problem 
 	if eae.Status != nil {
 		out.Status = *eae.Status
 	}
-	out.Detail = eae.Detail
+	detail := ""
+	if eae.Detail != nil {
+		detail = *eae.Detail
+	}
+	if eae.EnvId != nil {
+		if detail != "" {
+			detail += "; "
+		}
+		detail += "env_id=" + eae.EnvId.String()
+	}
+	if detail != "" {
+		out.Detail = &detail
+	}
 	return out
 }
 

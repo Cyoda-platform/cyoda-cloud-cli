@@ -271,6 +271,12 @@ func TestEnvUp_AlreadyExists409(t *testing.T) {
 	if !strings.Contains(cerr.Error(), "already exists") {
 		t.Errorf("error message = %q, want title surfaced", cerr.Error())
 	}
+	// Server returns the leader's env_id in the EnvAlreadyExistsProblem
+	// extension. Surface it so the user can `env status <name>` against
+	// the existing env or attach the id to a support ticket.
+	if !strings.Contains(cerr.Error(), "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa") {
+		t.Errorf("error message = %q, want env_id surfaced", cerr.Error())
+	}
 }
 
 func TestEnvUp_RejectsShortIdempotencyKey(t *testing.T) {
