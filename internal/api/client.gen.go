@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 const (
@@ -47,6 +48,50 @@ type Build struct {
 	TeamcityBuildId *string    `json:"teamcity_build_id,omitempty"`
 }
 
+// EnvAlreadyExistsProblem Returned when a non-terminal env with the same env_name already exists for the org.
+type EnvAlreadyExistsProblem struct {
+	Detail *string             `json:"detail,omitempty"`
+	EnvId  *openapi_types.UUID `json:"env_id,omitempty"`
+	Status *int                `json:"status,omitempty"`
+	Title  *string             `json:"title,omitempty"`
+	Type   *string             `json:"type,omitempty"`
+}
+
+// EnvDetail defines model for EnvDetail.
+type EnvDetail struct {
+	AppNamespace *string             `json:"app_namespace,omitempty"`
+	BuildId      *string             `json:"build_id,omitempty"`
+	CreationDate *time.Time          `json:"creation_date,omitempty"`
+	CyodaEnvUrl  *string             `json:"cyoda_env_url,omitempty"`
+	EnvId        *openapi_types.UUID `json:"env_id,omitempty"`
+
+	// EnvName User-supplied env name. DNS-1123 label rules + reserved-name guards.
+	// See spec §3 for full validation.
+	EnvName     *EnvName `json:"env_name,omitempty"`
+	M2mClientId *string  `json:"m2m_client_id,omitempty"`
+	Namespace   *string  `json:"namespace,omitempty"`
+	State       *string  `json:"state,omitempty"`
+}
+
+// EnvList defines model for EnvList.
+type EnvList = []EnvSummary
+
+// EnvName User-supplied env name. DNS-1123 label rules + reserved-name guards.
+// See spec §3 for full validation.
+type EnvName = string
+
+// EnvSummary defines model for EnvSummary.
+type EnvSummary struct {
+	CreationDate *time.Time          `json:"creation_date,omitempty"`
+	EnvId        *openapi_types.UUID `json:"env_id,omitempty"`
+
+	// EnvName User-supplied env name. DNS-1123 label rules + reserved-name guards.
+	// See spec §3 for full validation.
+	EnvName   *EnvName `json:"env_name,omitempty"`
+	Namespace *string  `json:"namespace,omitempty"`
+	State     *string  `json:"state,omitempty"`
+}
+
 // Me defines model for Me.
 type Me struct {
 	Features        map[string]bool `json:"features"`
@@ -69,6 +114,23 @@ type Problem struct {
 	Status   int     `json:"status"`
 	Title    string  `json:"title"`
 	Type     string  `json:"type"`
+}
+
+// ProvisionRequest defines model for ProvisionRequest.
+type ProvisionRequest struct {
+	Backend string  `json:"backend"`
+	ChatId  *string `json:"chat_id,omitempty"`
+
+	// EnvName User-supplied env name. DNS-1123 label rules + reserved-name guards.
+	// See spec §3 for full validation.
+	EnvName EnvName `json:"env_name"`
+
+	// M2mWithAdminRole Request that the bootstrap-minted M2M client also
+	// receive the ADMIN role on the user's Cyoda env. Subject
+	// to the env's `cyoda.security.web.jwt.m2m.admin-role-enabled`
+	// feature flag — if disabled, the entity ends up in
+	// Mint_Failed.
+	M2mWithAdminRole *bool `json:"m2m_with_admin_role,omitempty"`
 }
 
 // QuotaCounter defines model for QuotaCounter.
@@ -107,22 +169,21 @@ type PostV2BuildsParams struct {
 // PostV2BuildsJSONBodyAction defines parameters for PostV2Builds.
 type PostV2BuildsJSONBodyAction string
 
-// PostV2EnvJSONBody defines parameters for PostV2Env.
-type PostV2EnvJSONBody struct {
-	Backend string  `json:"backend"`
-	ChatId  *string `json:"chat_id,omitempty"`
+// ListEnvsParams defines parameters for ListEnvs.
+type ListEnvsParams struct {
+	IncludeTerminal *bool `form:"include_terminal,omitempty" json:"include_terminal,omitempty"`
 }
 
-// PostV2EnvParams defines parameters for PostV2Env.
-type PostV2EnvParams struct {
+// ProvisionEnvParams defines parameters for ProvisionEnv.
+type ProvisionEnvParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
 // PostV2BuildsJSONRequestBody defines body for PostV2Builds for application/json ContentType.
 type PostV2BuildsJSONRequestBody PostV2BuildsJSONBody
 
-// PostV2EnvJSONRequestBody defines body for PostV2Env for application/json ContentType.
-type PostV2EnvJSONRequestBody PostV2EnvJSONBody
+// ProvisionEnvJSONRequestBody defines body for ProvisionEnv for application/json ContentType.
+type ProvisionEnvJSONRequestBody = ProvisionRequest
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -220,19 +281,22 @@ type ClientInterface interface {
 	// PostV2BuildsBuildIdCancel request
 	PostV2BuildsBuildIdCancel(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// DeleteV2Env request
-	DeleteV2Env(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListEnvs request
+	ListEnvs(ctx context.Context, params *ListEnvsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetV2Env request
-	GetV2Env(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ProvisionEnvWithBody request with any body
+	ProvisionEnvWithBody(ctx context.Context, params *ProvisionEnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// PostV2EnvWithBody request with any body
-	PostV2EnvWithBody(ctx context.Context, params *PostV2EnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ProvisionEnv(ctx context.Context, params *ProvisionEnvParams, body ProvisionEnvJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	PostV2Env(ctx context.Context, params *PostV2EnvParams, body PostV2EnvJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// DeleteEnv request
+	DeleteEnv(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// PostV2EnvCancel request
-	PostV2EnvCancel(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetEnv request
+	GetEnv(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CancelEnv request
+	CancelEnv(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetV2Me request
 	GetV2Me(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -334,8 +398,8 @@ func (c *Client) PostV2BuildsBuildIdCancel(ctx context.Context, buildId string, 
 	return c.Client.Do(req)
 }
 
-func (c *Client) DeleteV2Env(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewDeleteV2EnvRequest(c.Server)
+func (c *Client) ListEnvs(ctx context.Context, params *ListEnvsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListEnvsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -346,8 +410,8 @@ func (c *Client) DeleteV2Env(ctx context.Context, reqEditors ...RequestEditorFn)
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetV2Env(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetV2EnvRequest(c.Server)
+func (c *Client) ProvisionEnvWithBody(ctx context.Context, params *ProvisionEnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProvisionEnvRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -358,8 +422,8 @@ func (c *Client) GetV2Env(ctx context.Context, reqEditors ...RequestEditorFn) (*
 	return c.Client.Do(req)
 }
 
-func (c *Client) PostV2EnvWithBody(ctx context.Context, params *PostV2EnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPostV2EnvRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) ProvisionEnv(ctx context.Context, params *ProvisionEnvParams, body ProvisionEnvJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProvisionEnvRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -370,8 +434,8 @@ func (c *Client) PostV2EnvWithBody(ctx context.Context, params *PostV2EnvParams,
 	return c.Client.Do(req)
 }
 
-func (c *Client) PostV2Env(ctx context.Context, params *PostV2EnvParams, body PostV2EnvJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPostV2EnvRequest(c.Server, params, body)
+func (c *Client) DeleteEnv(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteEnvRequest(c.Server, name)
 	if err != nil {
 		return nil, err
 	}
@@ -382,8 +446,20 @@ func (c *Client) PostV2Env(ctx context.Context, params *PostV2EnvParams, body Po
 	return c.Client.Do(req)
 }
 
-func (c *Client) PostV2EnvCancel(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPostV2EnvCancelRequest(c.Server)
+func (c *Client) GetEnv(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEnvRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CancelEnv(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCancelEnvRequest(c.Server, name)
 	if err != nil {
 		return nil, err
 	}
@@ -712,8 +788,8 @@ func NewPostV2BuildsBuildIdCancelRequest(server string, buildId string) (*http.R
 	return req, nil
 }
 
-// NewDeleteV2EnvRequest generates requests for DeleteV2Env
-func NewDeleteV2EnvRequest(server string) (*http.Request, error) {
+// NewListEnvsRequest generates requests for ListEnvs
+func NewListEnvsRequest(server string, params *ListEnvsParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -721,7 +797,7 @@ func NewDeleteV2EnvRequest(server string) (*http.Request, error) {
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/v2/env")
+	operationPath := fmt.Sprintf("/v2/envs")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -731,31 +807,26 @@ func NewDeleteV2EnvRequest(server string) (*http.Request, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
+	if params != nil {
+		queryValues := queryURL.Query()
 
-	return req, nil
-}
+		if params.IncludeTerminal != nil {
 
-// NewGetV2EnvRequest generates requests for GetV2Env
-func NewGetV2EnvRequest(server string) (*http.Request, error) {
-	var err error
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "include_terminal", runtime.ParamLocationQuery, *params.IncludeTerminal); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
 
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
+		}
 
-	operationPath := fmt.Sprintf("/v2/env")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
+		queryURL.RawQuery = queryValues.Encode()
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
@@ -766,19 +837,19 @@ func NewGetV2EnvRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
-// NewPostV2EnvRequest calls the generic PostV2Env builder with application/json body
-func NewPostV2EnvRequest(server string, params *PostV2EnvParams, body PostV2EnvJSONRequestBody) (*http.Request, error) {
+// NewProvisionEnvRequest calls the generic ProvisionEnv builder with application/json body
+func NewProvisionEnvRequest(server string, params *ProvisionEnvParams, body ProvisionEnvJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewPostV2EnvRequestWithBody(server, params, "application/json", bodyReader)
+	return NewProvisionEnvRequestWithBody(server, params, "application/json", bodyReader)
 }
 
-// NewPostV2EnvRequestWithBody generates requests for PostV2Env with any type of body
-func NewPostV2EnvRequestWithBody(server string, params *PostV2EnvParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewProvisionEnvRequestWithBody generates requests for ProvisionEnv with any type of body
+func NewProvisionEnvRequestWithBody(server string, params *ProvisionEnvParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -786,7 +857,7 @@ func NewPostV2EnvRequestWithBody(server string, params *PostV2EnvParams, content
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/v2/env")
+	operationPath := fmt.Sprintf("/v2/envs")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -819,16 +890,91 @@ func NewPostV2EnvRequestWithBody(server string, params *PostV2EnvParams, content
 	return req, nil
 }
 
-// NewPostV2EnvCancelRequest generates requests for PostV2EnvCancel
-func NewPostV2EnvCancelRequest(server string) (*http.Request, error) {
+// NewDeleteEnvRequest generates requests for DeleteEnv
+func NewDeleteEnvRequest(server string, name EnvName) (*http.Request, error) {
 	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
 
 	serverURL, err := url.Parse(server)
 	if err != nil {
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/v2/env:cancel")
+	operationPath := fmt.Sprintf("/v2/envs/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetEnvRequest generates requests for GetEnv
+func NewGetEnvRequest(server string, name EnvName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v2/envs/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCancelEnvRequest generates requests for CancelEnv
+func NewCancelEnvRequest(server string, name EnvName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v2/envs/%s:cancel", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -939,19 +1085,22 @@ type ClientWithResponsesInterface interface {
 	// PostV2BuildsBuildIdCancelWithResponse request
 	PostV2BuildsBuildIdCancelWithResponse(ctx context.Context, buildId string, reqEditors ...RequestEditorFn) (*PostV2BuildsBuildIdCancelResponse, error)
 
-	// DeleteV2EnvWithResponse request
-	DeleteV2EnvWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*DeleteV2EnvResponse, error)
+	// ListEnvsWithResponse request
+	ListEnvsWithResponse(ctx context.Context, params *ListEnvsParams, reqEditors ...RequestEditorFn) (*ListEnvsResponse, error)
 
-	// GetV2EnvWithResponse request
-	GetV2EnvWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetV2EnvResponse, error)
+	// ProvisionEnvWithBodyWithResponse request with any body
+	ProvisionEnvWithBodyWithResponse(ctx context.Context, params *ProvisionEnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProvisionEnvResponse, error)
 
-	// PostV2EnvWithBodyWithResponse request with any body
-	PostV2EnvWithBodyWithResponse(ctx context.Context, params *PostV2EnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostV2EnvResponse, error)
+	ProvisionEnvWithResponse(ctx context.Context, params *ProvisionEnvParams, body ProvisionEnvJSONRequestBody, reqEditors ...RequestEditorFn) (*ProvisionEnvResponse, error)
 
-	PostV2EnvWithResponse(ctx context.Context, params *PostV2EnvParams, body PostV2EnvJSONRequestBody, reqEditors ...RequestEditorFn) (*PostV2EnvResponse, error)
+	// DeleteEnvWithResponse request
+	DeleteEnvWithResponse(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*DeleteEnvResponse, error)
 
-	// PostV2EnvCancelWithResponse request
-	PostV2EnvCancelWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*PostV2EnvCancelResponse, error)
+	// GetEnvWithResponse request
+	GetEnvWithResponse(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*GetEnvResponse, error)
+
+	// CancelEnvWithResponse request
+	CancelEnvWithResponse(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*CancelEnvResponse, error)
 
 	// GetV2MeWithResponse request
 	GetV2MeWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetV2MeResponse, error)
@@ -1121,79 +1270,41 @@ func (r PostV2BuildsBuildIdCancelResponse) StatusCode() int {
 	return 0
 }
 
-type DeleteV2EnvResponse struct {
+type ListEnvsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *EnvList
+}
+
+// Status returns HTTPResponse.Status
+func (r ListEnvsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListEnvsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ProvisionEnvResponse struct {
 	Body                      []byte
 	HTTPResponse              *http.Response
-	ApplicationproblemJSON404 *Problem
-	ApplicationproblemJSON409 *Problem
-}
-
-// Status returns HTTPResponse.Status
-func (r DeleteV2EnvResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r DeleteV2EnvResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type GetV2EnvResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *struct {
-		EnvId         *string `json:"env_id,omitempty"`
-		JobStatus     *string `json:"job_status,omitempty"`
-		JobStatusText *string `json:"job_status_text,omitempty"`
-		Namespace     *string `json:"namespace,omitempty"`
-		State         *string `json:"state,omitempty"`
-	}
-	ApplicationproblemJSON404 *Problem
-}
-
-// Status returns HTTPResponse.Status
-func (r GetV2EnvResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetV2EnvResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type PostV2EnvResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *struct {
-		EnvId     string `json:"env_id"`
-		Namespace string `json:"namespace"`
-		State     string `json:"state"`
-	}
-	JSON202 *struct {
-		EnvId     string `json:"env_id"`
-		Namespace string `json:"namespace"`
-		State     string `json:"state"`
-	}
+	JSON200                   *EnvDetail
+	JSON202                   *EnvDetail
 	ApplicationproblemJSON400 *Problem
 	ApplicationproblemJSON403 *Problem
-	ApplicationproblemJSON409 *Problem
+	ApplicationproblemJSON409 *EnvAlreadyExistsProblem
 	ApplicationproblemJSON429 *Problem
 }
 
 // Status returns HTTPResponse.Status
-func (r PostV2EnvResponse) Status() string {
+func (r ProvisionEnvResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -1201,14 +1312,59 @@ func (r PostV2EnvResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r PostV2EnvResponse) StatusCode() int {
+func (r ProvisionEnvResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type PostV2EnvCancelResponse struct {
+type DeleteEnvResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	ApplicationproblemJSON404 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteEnvResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteEnvResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetEnvResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *EnvDetail
+	ApplicationproblemJSON404 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r GetEnvResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetEnvResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CancelEnvResponse struct {
 	Body                      []byte
 	HTTPResponse              *http.Response
 	ApplicationproblemJSON404 *Problem
@@ -1216,7 +1372,7 @@ type PostV2EnvCancelResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r PostV2EnvCancelResponse) Status() string {
+func (r CancelEnvResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -1224,7 +1380,7 @@ func (r PostV2EnvCancelResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r PostV2EnvCancelResponse) StatusCode() int {
+func (r CancelEnvResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -1325,48 +1481,57 @@ func (c *ClientWithResponses) PostV2BuildsBuildIdCancelWithResponse(ctx context.
 	return ParsePostV2BuildsBuildIdCancelResponse(rsp)
 }
 
-// DeleteV2EnvWithResponse request returning *DeleteV2EnvResponse
-func (c *ClientWithResponses) DeleteV2EnvWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*DeleteV2EnvResponse, error) {
-	rsp, err := c.DeleteV2Env(ctx, reqEditors...)
+// ListEnvsWithResponse request returning *ListEnvsResponse
+func (c *ClientWithResponses) ListEnvsWithResponse(ctx context.Context, params *ListEnvsParams, reqEditors ...RequestEditorFn) (*ListEnvsResponse, error) {
+	rsp, err := c.ListEnvs(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseDeleteV2EnvResponse(rsp)
+	return ParseListEnvsResponse(rsp)
 }
 
-// GetV2EnvWithResponse request returning *GetV2EnvResponse
-func (c *ClientWithResponses) GetV2EnvWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetV2EnvResponse, error) {
-	rsp, err := c.GetV2Env(ctx, reqEditors...)
+// ProvisionEnvWithBodyWithResponse request with arbitrary body returning *ProvisionEnvResponse
+func (c *ClientWithResponses) ProvisionEnvWithBodyWithResponse(ctx context.Context, params *ProvisionEnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProvisionEnvResponse, error) {
+	rsp, err := c.ProvisionEnvWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseGetV2EnvResponse(rsp)
+	return ParseProvisionEnvResponse(rsp)
 }
 
-// PostV2EnvWithBodyWithResponse request with arbitrary body returning *PostV2EnvResponse
-func (c *ClientWithResponses) PostV2EnvWithBodyWithResponse(ctx context.Context, params *PostV2EnvParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostV2EnvResponse, error) {
-	rsp, err := c.PostV2EnvWithBody(ctx, params, contentType, body, reqEditors...)
+func (c *ClientWithResponses) ProvisionEnvWithResponse(ctx context.Context, params *ProvisionEnvParams, body ProvisionEnvJSONRequestBody, reqEditors ...RequestEditorFn) (*ProvisionEnvResponse, error) {
+	rsp, err := c.ProvisionEnv(ctx, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePostV2EnvResponse(rsp)
+	return ParseProvisionEnvResponse(rsp)
 }
 
-func (c *ClientWithResponses) PostV2EnvWithResponse(ctx context.Context, params *PostV2EnvParams, body PostV2EnvJSONRequestBody, reqEditors ...RequestEditorFn) (*PostV2EnvResponse, error) {
-	rsp, err := c.PostV2Env(ctx, params, body, reqEditors...)
+// DeleteEnvWithResponse request returning *DeleteEnvResponse
+func (c *ClientWithResponses) DeleteEnvWithResponse(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*DeleteEnvResponse, error) {
+	rsp, err := c.DeleteEnv(ctx, name, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePostV2EnvResponse(rsp)
+	return ParseDeleteEnvResponse(rsp)
 }
 
-// PostV2EnvCancelWithResponse request returning *PostV2EnvCancelResponse
-func (c *ClientWithResponses) PostV2EnvCancelWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*PostV2EnvCancelResponse, error) {
-	rsp, err := c.PostV2EnvCancel(ctx, reqEditors...)
+// GetEnvWithResponse request returning *GetEnvResponse
+func (c *ClientWithResponses) GetEnvWithResponse(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*GetEnvResponse, error) {
+	rsp, err := c.GetEnv(ctx, name, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePostV2EnvCancelResponse(rsp)
+	return ParseGetEnvResponse(rsp)
+}
+
+// CancelEnvWithResponse request returning *CancelEnvResponse
+func (c *ClientWithResponses) CancelEnvWithResponse(ctx context.Context, name EnvName, reqEditors ...RequestEditorFn) (*CancelEnvResponse, error) {
+	rsp, err := c.CancelEnv(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCancelEnvResponse(rsp)
 }
 
 // GetV2MeWithResponse request returning *GetV2MeResponse
@@ -1579,109 +1744,55 @@ func ParsePostV2BuildsBuildIdCancelResponse(rsp *http.Response) (*PostV2BuildsBu
 	return response, nil
 }
 
-// ParseDeleteV2EnvResponse parses an HTTP response from a DeleteV2EnvWithResponse call
-func ParseDeleteV2EnvResponse(rsp *http.Response) (*DeleteV2EnvResponse, error) {
+// ParseListEnvsResponse parses an HTTP response from a ListEnvsWithResponse call
+func ParseListEnvsResponse(rsp *http.Response) (*ListEnvsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &DeleteV2EnvResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest Problem
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationproblemJSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest Problem
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationproblemJSON409 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseGetV2EnvResponse parses an HTTP response from a GetV2EnvWithResponse call
-func ParseGetV2EnvResponse(rsp *http.Response) (*GetV2EnvResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &GetV2EnvResponse{
+	response := &ListEnvsResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			EnvId         *string `json:"env_id,omitempty"`
-			JobStatus     *string `json:"job_status,omitempty"`
-			JobStatusText *string `json:"job_status_text,omitempty"`
-			Namespace     *string `json:"namespace,omitempty"`
-			State         *string `json:"state,omitempty"`
-		}
+		var dest EnvList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
 		response.JSON200 = &dest
 
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest Problem
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationproblemJSON404 = &dest
-
 	}
 
 	return response, nil
 }
 
-// ParsePostV2EnvResponse parses an HTTP response from a PostV2EnvWithResponse call
-func ParsePostV2EnvResponse(rsp *http.Response) (*PostV2EnvResponse, error) {
+// ParseProvisionEnvResponse parses an HTTP response from a ProvisionEnvWithResponse call
+func ParseProvisionEnvResponse(rsp *http.Response) (*ProvisionEnvResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &PostV2EnvResponse{
+	response := &ProvisionEnvResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			EnvId     string `json:"env_id"`
-			Namespace string `json:"namespace"`
-			State     string `json:"state"`
-		}
+		var dest EnvDetail
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
 		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
-		var dest struct {
-			EnvId     string `json:"env_id"`
-			Namespace string `json:"namespace"`
-			State     string `json:"state"`
-		}
+		var dest EnvDetail
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -1702,7 +1813,7 @@ func ParsePostV2EnvResponse(rsp *http.Response) (*PostV2EnvResponse, error) {
 		response.ApplicationproblemJSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest Problem
+		var dest EnvAlreadyExistsProblem
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -1720,15 +1831,74 @@ func ParsePostV2EnvResponse(rsp *http.Response) (*PostV2EnvResponse, error) {
 	return response, nil
 }
 
-// ParsePostV2EnvCancelResponse parses an HTTP response from a PostV2EnvCancelWithResponse call
-func ParsePostV2EnvCancelResponse(rsp *http.Response) (*PostV2EnvCancelResponse, error) {
+// ParseDeleteEnvResponse parses an HTTP response from a DeleteEnvWithResponse call
+func ParseDeleteEnvResponse(rsp *http.Response) (*DeleteEnvResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &PostV2EnvCancelResponse{
+	response := &DeleteEnvResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetEnvResponse parses an HTTP response from a GetEnvWithResponse call
+func ParseGetEnvResponse(rsp *http.Response) (*GetEnvResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetEnvResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EnvDetail
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCancelEnvResponse parses an HTTP response from a CancelEnvWithResponse call
+func ParseCancelEnvResponse(rsp *http.Response) (*CancelEnvResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CancelEnvResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

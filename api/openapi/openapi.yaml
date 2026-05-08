@@ -63,6 +63,58 @@ components:
         pipeline_name: { type: string }
         chat_id: { type: string }
         teamcity_build_id: { type: string }
+    EnvName:
+      type: string
+      pattern: '^[a-z][a-z0-9-]{0,21}$'
+      maxLength: 22
+      description: |
+        User-supplied env name. DNS-1123 label rules + reserved-name guards.
+        See spec §3 for full validation.
+      example: dev
+    ProvisionRequest:
+      type: object
+      required: [env_name, backend]
+      properties:
+        env_name: { $ref: '#/components/schemas/EnvName' }
+        backend: { type: string }
+        chat_id: { type: string }
+        m2m_with_admin_role:
+          type: boolean
+          description: |
+            Request that the bootstrap-minted M2M client also
+            receive the ADMIN role on the user's Cyoda env. Subject
+            to the env's `cyoda.security.web.jwt.m2m.admin-role-enabled`
+            feature flag — if disabled, the entity ends up in
+            Mint_Failed.
+    EnvSummary:
+      type: object
+      properties:
+        env_id: { type: string, format: uuid }
+        env_name: { $ref: '#/components/schemas/EnvName' }
+        state: { type: string }
+        namespace: { type: string }
+        creation_date: { type: string, format: date-time }
+    EnvDetail:
+      allOf:
+        - $ref: '#/components/schemas/EnvSummary'
+        - type: object
+          properties:
+            app_namespace: { type: string }
+            cyoda_env_url: { type: string, format: uri }
+            m2m_client_id: { type: string }
+            build_id: { type: string }
+    EnvList:
+      type: array
+      items: { $ref: '#/components/schemas/EnvSummary' }
+    EnvAlreadyExistsProblem:
+      type: object
+      description: Returned when a non-terminal env with the same env_name already exists for the org.
+      properties:
+        type: { type: string, example: env-already-exists }
+        title: { type: string }
+        status: { type: integer, example: 409 }
+        detail: { type: string }
+        env_id: { type: string, format: uuid }
 paths:
   /v2/me:
     get:
@@ -80,9 +132,10 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
-  /v2/env:
+  /v2/envs:
     post:
-      summary: Provision env for caller's org
+      summary: Provision an env
+      operationId: provisionEnv
       security: [{bearer: []}]
       parameters:
         - in: header
@@ -94,74 +147,79 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [backend]
-              properties:
-                backend: { type: string }
-                chat_id: { type: string }
+              $ref: '#/components/schemas/ProvisionRequest'
       responses:
         '202':
-          description: queued
+          description: Accepted (provision dispatched)
           content:
             application/json:
-              schema:
-                type: object
-                required: [env_id, namespace, state]
-                properties:
-                  env_id: { type: string }
-                  namespace: { type: string }
-                  state: { type: string }
+              schema: { $ref: '#/components/schemas/EnvDetail' }
         '200':
-          description: replay of prior idempotent submit
+          description: Idempotent replay
           content:
             application/json:
-              schema:
-                type: object
-                required: [env_id, namespace, state]
-                properties:
-                  env_id: { type: string }
-                  namespace: { type: string }
-                  state: { type: string }
+              schema: { $ref: '#/components/schemas/EnvDetail' }
         '400': { description: validation, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { description: forbidden / tier-not-entitled, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: idempotency conflict, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409':
+          description: Idempotency or name conflict
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/EnvAlreadyExistsProblem' }
         '429': { description: quota exceeded or rate limited, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
-      summary: Current env state for caller's org
+      summary: List envs
+      operationId: listEnvs
+      security: [{bearer: []}]
+      parameters:
+        - in: query
+          name: include_terminal
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: List of envs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnvList' }
+  /v2/envs/{name}:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: { $ref: '#/components/schemas/EnvName' }
+    get:
+      summary: Get one env
+      operationId: getEnv
       security: [{bearer: []}]
       responses:
         '200':
-          description: ok
+          description: Env detail
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  env_id: { type: string }
-                  namespace: { type: string }
-                  state: { type: string }
-                  job_status: { type: string }
-                  job_status_text: { type: string }
-        '404':
-          description: no env found
-          content:
-            application/problem+json:
-              schema: { $ref: '#/components/schemas/Problem' }
+              schema: { $ref: '#/components/schemas/EnvDetail' }
+        '404': { description: not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     delete:
-      summary: Tear down provisioned env
+      summary: Teardown an env
+      operationId: deleteEnv
       security: [{bearer: []}]
       responses:
-        '202': { description: teardown queued }
-        '404': { description: no env found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: app still deployed, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-  /v2/env:cancel:
+        '202': { description: teardown accepted }
+        '404': { description: not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v2/envs/{name}:cancel:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: { $ref: '#/components/schemas/EnvName' }
     post:
-      summary: Cancel in-flight env op
+      summary: Cancel in-flight provision
+      operationId: cancelEnv
       security: [{bearer: []}]
       responses:
-        '202': { description: cancellation queued }
-        '404': { description: no env found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: state does not allow cancel, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '202': { description: cancel accepted }
+        '404': { description: not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: env in non-cancellable state, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v2/builds:
     get:
       summary: List builds for caller's org (cursor-paginated)
