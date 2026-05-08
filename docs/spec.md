@@ -804,7 +804,7 @@ cyoda-cloud-cli/
 cyoda-cloud register [--device] [--org <slug>]
 cyoda-cloud login    [--device] [--org <slug>] [--scope <list>]
 cyoda-cloud logout
-cyoda-cloud whoami [--output json]
+cyoda-cloud whoami [--output-json]
 cyoda-cloud token print --show
 
 cyoda-cloud env up     <name> [--backend <type>] [--wait] [--idempotency-key <key>] [--m2m-with-admin-role]
@@ -831,7 +831,7 @@ cyoda-cloud version
 ### 6.5 Output
 
 - **Default** (TTY): tables, coloured states.
-- **`--output json`** or non-TTY: JSON only.
+- **`--output-json`** or non-TTY: JSON only.
 - Logs to stderr, data to stdout.
 - **No interactive prompts when stdin is not a TTY.** Critical for AI-agent use.
 
