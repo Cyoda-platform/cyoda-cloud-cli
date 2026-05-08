@@ -431,6 +431,21 @@ If state isn't terminal, fires the `check_job_state` workflow transition — deb
 
 Common `type` values: `unauthenticated`, `forbidden`, `not-found`, `tier-not-entitled`, `quota-exceeded`, `idempotency-conflict`, `cursor-expired`, `validation-error`, `invalid-org-id`, `upstream-failure`, `revoked`. CLI maps `type` → exit code (Section 6.6).
 
+**Server-min-version handling** (spec §6.8). The manager returns `426 Upgrade Required` with a Problem body whenever `Cyoda-Cloud-CLI-Version` falls below `CLI_MIN_VERSION`. The Problem `detail` SHOULD name the required minimum so the user has actionable information. Example:
+
+```json
+{
+  "type": "https://docs.cyoda.cloud/errors/server-min-version-required",
+  "title": "upgrade-required",
+  "status": 426,
+  "detail": "CLI version 0.0.0 is below required minimum 0.4.0; please upgrade"
+}
+```
+
+The CLI surfaces the `detail` to the user and exits 10 (`CodeServerMinVersionRequired`). There is no on-every-command precheck; the soft check via `cyoda-cloud version --check` plus the hard 426 enforcement covers spec §6.8.
+
+> **Follow-up (manager repo).** The vendored OpenAPI spec at `api/openapi/openapi.yaml` does not currently declare a `default:` error response on any path, so oapi-codegen does not produce a typed `ApplicationproblemJSONDefault *Problem` field. To compensate, the CLI's `problemToError` helper falls back to decoding the raw response body as Problem when Content-Type is `application/problem+json` and no typed field is set. Adding `default:` error responses (mapping to `Problem`) to each path on the manager side would let codegen surface the typed value directly and render this fallback dead code.
+
 ### 4.5 Idempotency
 
 - `Idempotency-Key` is opaque, max 200 chars, **min 16 chars of entropy** (rejected with `validation-error` otherwise).

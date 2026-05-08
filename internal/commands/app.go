@@ -158,7 +158,7 @@ func runAppBuildOrDeploy(cmd *cobra.Command, f appCommonFlags, a appBuildArgs, a
 	if resp.StatusCode() == http.StatusUnauthorized {
 		return errSessionExpired()
 	}
-	if cerr := problemToError(resp.StatusCode(), resp.ApplicationproblemJSON403); cerr != nil {
+	if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, resp.ApplicationproblemJSON403); cerr != nil {
 		return cerr
 	}
 	if resp.JSON202 == nil {
@@ -264,7 +264,7 @@ func runAppList(cmd *cobra.Command, f appCommonFlags, a appListArgs) error {
 	if resp.StatusCode() == http.StatusUnauthorized {
 		return errSessionExpired()
 	}
-	if cerr := problemToError(resp.StatusCode(), resp.ApplicationproblemJSON409); cerr != nil {
+	if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, resp.ApplicationproblemJSON409); cerr != nil {
 		return cerr
 	}
 	if resp.JSON200 == nil {
@@ -334,7 +334,7 @@ func runAppStatus(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 	if resp.StatusCode() == http.StatusUnauthorized {
 		return errSessionExpired()
 	}
-	if cerr := problemToError(resp.StatusCode(), resp.ApplicationproblemJSON404); cerr != nil {
+	if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, resp.ApplicationproblemJSON404); cerr != nil {
 		return cerr
 	}
 	if resp.JSON200 == nil {
@@ -382,7 +382,7 @@ func runAppCancel(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 		fmt.Fprintln(cmd.ErrOrStderr(), "build cancellation queued.")
 		return nil
 	}
-	if cerr := problemToError(resp.StatusCode(), resp.ApplicationproblemJSON403); cerr != nil {
+	if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, resp.ApplicationproblemJSON403); cerr != nil {
 		return cerr
 	}
 	return &output.CLIError{
@@ -426,7 +426,7 @@ func runAppDelete(cmd *cobra.Command, f appCommonFlags, buildID string) error {
 		fmt.Fprintln(cmd.ErrOrStderr(), "build deletion queued.")
 		return nil
 	}
-	if cerr := problemToError(resp.StatusCode(), resp.ApplicationproblemJSON403); cerr != nil {
+	if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, resp.ApplicationproblemJSON403); cerr != nil {
 		return cerr
 	}
 	return &output.CLIError{

@@ -223,7 +223,7 @@ func envUpErrorFromResponse(resp *api.ProvisionEnvResponse) error {
 	case http.StatusTooManyRequests:
 		p = resp.ApplicationproblemJSON429
 	}
-	return problemToError(status, p)
+	return problemToError(status, resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, p)
 }
 
 // problemFromEnvAlreadyExists collapses the specialised 409 shape into the
@@ -294,7 +294,7 @@ func runEnvList(cmd *cobra.Command, f envCommonFlags, includeTerminal bool) erro
 		return errSessionExpired()
 	}
 	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
-		if cerr := problemToError(resp.StatusCode(), nil); cerr != nil {
+		if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, nil); cerr != nil {
 			return cerr
 		}
 		return &output.CLIError{
@@ -371,7 +371,7 @@ func runEnvStatus(cmd *cobra.Command, f envCommonFlags, name string) error {
 		}
 	}
 	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
-		if cerr := problemToError(resp.StatusCode(), nil); cerr != nil {
+		if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, nil); cerr != nil {
 			return cerr
 		}
 		return &output.CLIError{
@@ -430,7 +430,7 @@ func runEnvCancel(cmd *cobra.Command, f envCommonFlags, name string) error {
 	case http.StatusConflict:
 		p = resp.ApplicationproblemJSON409
 	}
-	if cerr := problemToError(resp.StatusCode(), p); cerr != nil {
+	if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, p); cerr != nil {
 		return cerr
 	}
 	return &output.CLIError{
@@ -488,7 +488,7 @@ func runEnvDown(cmd *cobra.Command, f envCommonFlags, name string, wait bool) er
 		if resp.StatusCode() == http.StatusNotFound {
 			p = resp.ApplicationproblemJSON404
 		}
-		if cerr := problemToError(resp.StatusCode(), p); cerr != nil {
+		if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, p); cerr != nil {
 			return cerr
 		}
 		return &output.CLIError{
@@ -529,7 +529,7 @@ func waitForEnvTerminal(cmd *cobra.Command, cli *api.ClientWithResponses, name s
 				return "", false, err
 			}
 			if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
-				if cerr := problemToError(resp.StatusCode(), resp.ApplicationproblemJSON404); cerr != nil {
+				if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, resp.ApplicationproblemJSON404); cerr != nil {
 					return "", false, cerr
 				}
 				return "", false, fmt.Errorf("env status during wait: status %d", resp.StatusCode())
@@ -562,7 +562,7 @@ func waitForEnvTeardown(cmd *cobra.Command, cli *api.ClientWithResponses, name s
 				return "GONE", true, nil
 			}
 			if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
-				if cerr := problemToError(resp.StatusCode(), nil); cerr != nil {
+				if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, nil); cerr != nil {
 					return "", false, cerr
 				}
 				return "", false, fmt.Errorf("env status during teardown: status %d", resp.StatusCode())
