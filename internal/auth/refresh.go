@@ -19,6 +19,19 @@ import (
 // to exit code 3 (unauthenticated).
 var ErrSessionExpired = errors.New("session expired")
 
+// ErrRefreshTokenNotIssued signals that a successful auth flow returned
+// tokens without a refresh_token despite offline_access being requested.
+// The proximate Auth0 cause is "Allow Offline Access" being OFF on the
+// API in the tenant configuration; Auth0 silently drops offline_access
+// from the granted scope set instead of failing the request. Without
+// this sentinel the user sees "login succeeded" then every subsequent
+// command fails opaquely on refresh.
+//
+// Callers that explicitly opt out of offline_access (e.g. via --scope)
+// must NOT trigger this — the absence of an RT is the documented
+// behaviour for that case.
+var ErrRefreshTokenNotIssued = errors.New("auth0 returned no refresh token despite offline_access being requested; check 'Allow Offline Access' on the API in the Auth0 tenant")
+
 // RefreshConfig holds the inputs needed to mint a new access token from a
 // refresh token. It is a sibling of LoopbackConfig — kept separate because
 // refresh has no notion of browsers, scopes, or stderr.

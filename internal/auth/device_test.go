@@ -146,6 +146,76 @@ func TestLoginDevice_HappyPath(t *testing.T) {
 	}
 }
 
+// Device-flow analogue of TestLoginPKCE_NoRefreshTokenWhenRequestedReturnsTypedError.
+// Same Auth0 misconfiguration (Allow Offline Access OFF on the API) silently
+// drops offline_access from the granted scope set, so the 200 response carries
+// access_token but no refresh_token. We surface a typed error with a
+// remediation hint instead of returning empty Tokens.
+func TestLoginDevice_NoRefreshTokenWhenRequestedReturnsTypedError(t *testing.T) {
+	deviceBody := `{
+		"device_code":"DEVICE",
+		"user_code":"ABCD-1234",
+		"verification_uri":"https://example.auth0.com/activate",
+		"verification_uri_complete":"https://example.auth0.com/activate?user_code=ABCD-1234",
+		"expires_in":900,
+		"interval":1
+	}`
+	tokens := []deviceTokenResp{
+		{http.StatusOK, `{"access_token":"AT","id_token":"IT","expires_in":3600,"scope":"openid profile"}`},
+	}
+	_, _, cleanup := withFakeDeviceAuth0(t, deviceBody, tokens)
+	defer cleanup()
+	withSleepRecorder(t)
+
+	cfg := LoopbackConfig{
+		Auth0Domain: "ignored.example",
+		ClientID:    "client",
+		Audience:    "https://api.cyoda.cloud",
+		Scopes:      []string{"openid", "profile", "offline_access"},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := LoginDevice(ctx, cfg)
+	if !errors.Is(err, ErrRefreshTokenNotIssued) {
+		t.Fatalf("expected ErrRefreshTokenNotIssued, got %v", err)
+	}
+}
+
+func TestLoginDevice_NoRefreshTokenAcceptedWhenNotRequested(t *testing.T) {
+	deviceBody := `{
+		"device_code":"DEVICE",
+		"user_code":"ABCD-1234",
+		"verification_uri":"https://example.auth0.com/activate",
+		"verification_uri_complete":"https://example.auth0.com/activate?user_code=ABCD-1234",
+		"expires_in":900,
+		"interval":1
+	}`
+	tokens := []deviceTokenResp{
+		{http.StatusOK, `{"access_token":"AT","id_token":"IT","expires_in":3600,"scope":"openid profile"}`},
+	}
+	_, _, cleanup := withFakeDeviceAuth0(t, deviceBody, tokens)
+	defer cleanup()
+	withSleepRecorder(t)
+
+	cfg := LoopbackConfig{
+		Auth0Domain: "ignored.example",
+		ClientID:    "client",
+		Audience:    "https://api.cyoda.cloud",
+		Scopes:      []string{"openid", "profile"}, // user opted out
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	toks, err := LoginDevice(ctx, cfg)
+	if err != nil {
+		t.Fatalf("LoginDevice: %v", err)
+	}
+	if toks.RefreshToken != "" {
+		t.Errorf("RefreshToken = %q, want empty", toks.RefreshToken)
+	}
+}
+
 func TestLoginDevice_SlowDownIncreasesIntervalBy5s(t *testing.T) {
 	deviceBody := `{
 		"device_code":"DEVICE",

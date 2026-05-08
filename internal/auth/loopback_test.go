@@ -148,6 +148,73 @@ func TestLoginPKCE_HappyPath(t *testing.T) {
 	}
 }
 
+// Regression for the "Auth0 silently dropped offline_access" production
+// surprise: the user requested it (it was in cfg.Scopes), Auth0 returned a
+// 200 with access_token but no refresh_token (because Allow Offline Access
+// was OFF on the API). Without this check, login appeared to succeed but
+// every subsequent command failed with "Missing required parameter:
+// refresh_token" from the manager's refresh path.
+//
+// The check fires only when offline_access was actually requested. If a
+// user explicitly opts out via --scope, no RT is the documented behaviour
+// and we do not flag it.
+func TestLoginPKCE_NoRefreshTokenWhenRequestedReturnsTypedError(t *testing.T) {
+	_, cleanup := withFakeAuth0(t, http.StatusOK, `{
+		"access_token":"AT",
+		"id_token":"IT",
+		"expires_in":3600,
+		"scope":"openid profile"
+	}`)
+	defer cleanup()
+
+	open, _ := browserGet(t)
+	cfg := LoopbackConfig{
+		Auth0Domain: "ignored.example",
+		ClientID:    "client",
+		Audience:    "https://api.cyoda.cloud",
+		Scopes:      []string{"openid", "profile", "offline_access"},
+		OpenBrowser: open,
+		BindAddr:    "127.0.0.1:0",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := LoginPKCE(ctx, cfg)
+	if !errors.Is(err, ErrRefreshTokenNotIssued) {
+		t.Fatalf("expected ErrRefreshTokenNotIssued, got %v", err)
+	}
+}
+
+func TestLoginPKCE_NoRefreshTokenAcceptedWhenNotRequested(t *testing.T) {
+	_, cleanup := withFakeAuth0(t, http.StatusOK, `{
+		"access_token":"AT",
+		"id_token":"IT",
+		"expires_in":3600,
+		"scope":"openid profile"
+	}`)
+	defer cleanup()
+
+	open, _ := browserGet(t)
+	cfg := LoopbackConfig{
+		Auth0Domain: "ignored.example",
+		ClientID:    "client",
+		Audience:    "https://api.cyoda.cloud",
+		Scopes:      []string{"openid", "profile"}, // no offline_access — user opted out
+		OpenBrowser: open,
+		BindAddr:    "127.0.0.1:0",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	toks, err := LoginPKCE(ctx, cfg)
+	if err != nil {
+		t.Fatalf("LoginPKCE: %v", err)
+	}
+	if toks.RefreshToken != "" {
+		t.Errorf("RefreshToken = %q, want empty", toks.RefreshToken)
+	}
+}
+
 func TestLoginPKCE_StateMismatch(t *testing.T) {
 	// Custom Auth0 emulator: tampers with the state on the redirect.
 	authBaseURLMu.Lock()
