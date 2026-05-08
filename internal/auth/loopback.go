@@ -172,7 +172,11 @@ func LoginPKCE(ctx context.Context, cfg LoopbackConfig) (Tokens, error) {
 
 	select {
 	case code := <-codeCh:
-		return exchangeToken(ctx, cfg, code, verifier, redirectURI)
+		toks, err := exchangeToken(ctx, cfg, code, verifier, redirectURI)
+		if err != nil {
+			return Tokens{}, err
+		}
+		return toks, checkRefreshTokenIssued(cfg.Scopes, toks)
 	case err := <-errCh:
 		return Tokens{}, err
 	case <-ctx.Done():
@@ -180,6 +184,23 @@ func LoginPKCE(ctx context.Context, cfg LoopbackConfig) (Tokens, error) {
 	case <-time.After(loginTimeout):
 		return Tokens{}, fmt.Errorf("login timeout")
 	}
+}
+
+// checkRefreshTokenIssued returns ErrRefreshTokenNotIssued when offline_access
+// was requested but the response carried no refresh_token. Returns nil
+// otherwise — including the legitimate "user opted out of offline_access"
+// path. Used by both LoginPKCE and LoginDevice; the auth flows differ but
+// the post-condition on the resulting Tokens is the same.
+func checkRefreshTokenIssued(scopes []string, toks Tokens) error {
+	if toks.RefreshToken != "" {
+		return nil
+	}
+	for _, s := range scopes {
+		if s == "offline_access" {
+			return ErrRefreshTokenNotIssued
+		}
+	}
+	return nil
 }
 
 // buildAuthURL composes the /authorize request URL.

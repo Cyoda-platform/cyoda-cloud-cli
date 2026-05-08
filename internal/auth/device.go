@@ -90,7 +90,7 @@ func LoginDevice(ctx context.Context, cfg LoopbackConfig) (Tokens, error) {
 		}
 		switch errCode {
 		case "":
-			return toks, nil
+			return toks, checkRefreshTokenIssued(cfg.Scopes, toks)
 		case "authorization_pending":
 			// keep polling at the current interval
 		case "slow_down":
