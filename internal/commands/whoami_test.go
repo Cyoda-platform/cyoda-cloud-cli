@@ -318,6 +318,76 @@ func TestWhoami_Non2xxMapsToCLIError(t *testing.T) {
 	}
 }
 
+// TestWhoami_426UpgradeRequiredSurfacesDetail is the end-to-end regression
+// for the body-decode fallback. The manager returns 426 Upgrade Required
+// with a problem+json body naming the required minimum CLI version. Before
+// the fix, /v2/me's response had no typed *api.Problem field for 426 (the
+// OpenAPI spec doesn't declare a `default:` error response), so the user
+// only saw "unexpected status 426" — actionable detail was dropped on the
+// floor. After the fix, the body-decode fallback in problemToError pulls
+// the Problem out of the raw body when the typed field is nil, surfaces
+// the detail, and still maps to exit 10 via codeForStatus.
+func TestWhoami_426UpgradeRequiredSurfacesDetail(t *testing.T) {
+	setupFileFallback(t)
+
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/me" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusUpgradeRequired)
+		_, _ = w.Write([]byte(`{"type":"https://docs.cyoda.cloud/errors/server-min-version-required","title":"upgrade-required","status":426,"detail":"CLI version 0.0.0 is below required minimum 0.4.0; please upgrade"}`))
+	}))
+	defer apiSrv.Close()
+
+	stubDiscoveryFile(t, apiSrv.URL)
+	_, cleanup := stubAuth0Token(t, "AT-fresh")
+	defer cleanup()
+
+	if err := keychain.Store(keychain.Profile{
+		Org:           "",
+		RefreshToken:  "RT0",
+		APIURL:        apiSrv.URL,
+		Auth0Domain:   "ignored.example",
+		Auth0ClientID: "client-id",
+		Auth0Audience: "https://api.cyoda.cloud",
+	}); err != nil {
+		t.Fatalf("seed keychain: %v", err)
+	}
+
+	cmd := NewWhoamiCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected 426 to produce error, got nil")
+	}
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err should be *output.CLIError (got %T): %v", err, err)
+	}
+	if cerr.Code != output.CodeServerMinVersionRequired {
+		t.Errorf("CLIError.Code = %d, want %d (ServerMinVersionRequired)",
+			cerr.Code, output.CodeServerMinVersionRequired)
+	}
+	if got := output.Exit(err); got != 10 {
+		t.Errorf("output.Exit = %d, want 10 (CodeServerMinVersionRequired)", got)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "0.4.0") {
+		t.Errorf("err message missing required-min version: %v", err)
+	}
+	if !strings.Contains(msg, "please upgrade") {
+		t.Errorf("err message missing detail: %v", err)
+	}
+}
+
 // TestWhoami_DefaultOrgFromConfig verifies that with default_org="abc" in
 // config.toml and no --org flag, the resolved org reaches BuildAPIClient
 // (and therefore keychain.Load). We seed the keychain only under "abc" — if

@@ -56,9 +56,10 @@ func runWhoami(cmd *cobra.Command, org string, asJSON bool) error {
 	// Non-2xx (other than 401, handled above) routes through problemToError
 	// so the error surfaces as a *output.CLIError with the spec §6.6 exit
 	// code (e.g. 503 → CodeUpstreamFailure → exit 9). /v2/me does not declare
-	// a Problem body in OpenAPI, so we pass nil and let output.WrapHTTP
-	// pick the code from the status alone. Mirrors the pattern in app.go.
-	if cerr := problemToError(resp.StatusCode(), nil); cerr != nil {
+	// a Problem body in OpenAPI, so we pass typed=nil; problemToError's
+	// body-decode fallback covers the unmapped-status case (e.g. 426 with
+	// problem+json body for spec §6.8 server-min-version enforcement).
+	if cerr := problemToError(resp.StatusCode(), resp.HTTPResponse.Header.Get("Content-Type"), resp.Body, nil); cerr != nil {
 		return cerr
 	}
 	if resp.JSON200 == nil {
