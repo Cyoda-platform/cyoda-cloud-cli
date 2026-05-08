@@ -88,7 +88,7 @@ Env operations are safe in v0 because env pipelines run cloud-manager-controlled
 │                                                              │
 │   chi router                                                 │
 │   middleware: request-id, slog, JWKS-auth, rate-limit       │
-│   handlers (oapi-codegen): /v2/me, /v2/env, /v2/builds, ... │
+│   handlers (oapi-codegen): /v2/me, /v2/envs, /v2/builds, ... │
 │                                                              │
 │   internal/                                                  │
 │     auth/        JWKS, Principal, scope checks               │
@@ -256,10 +256,10 @@ Build and deploy on the app side share `app_deploys_per_day` (variations of the 
 
 | Scope | Endpoints |
 |---|---|
-| `read:builds` | `GET /v2/me`, `GET /v2/builds`, `GET /v2/builds/{id}`, `GET /v2/env` |
-| `deploy:env` | `POST /v2/env` |
-| `cancel:env` | `POST /v2/env:cancel` |
-| `delete:env` | `DELETE /v2/env` |
+| `read:builds` | `GET /v2/me`, `GET /v2/builds`, `GET /v2/builds/{id}`, `GET /v2/envs`, `GET /v2/envs/{name}` |
+| `deploy:env` | `POST /v2/envs` |
+| `cancel:env` | `POST /v2/envs/{name}:cancel` |
+| `delete:env` | `DELETE /v2/envs/{name}` |
 | `deploy:app` | `POST /v2/builds` (action=build or deploy) — **v0: tier-blocked** |
 | `cancel:app` | `POST /v2/builds/{id}:cancel` — **v0: tier-blocked** |
 | `delete:app` | `DELETE /v2/builds/{id}` — **v0: tier-blocked** |
@@ -294,10 +294,11 @@ M2M tokens require an Auth0 Client Credentials Exchange Action (separate from th
 ```
 GET    /v2/me                                # identity, org, tier, scopes, quota usage
 
-POST   /v2/env                               # provision env for caller's org
-GET    /v2/env                               # current env state for caller's org
-POST   /v2/env:cancel                        # cancel an in-flight env provision
-DELETE /v2/env                               # tear down provisioned env
+POST   /v2/envs                              # provision a named env for caller's org
+GET    /v2/envs                              # list envs for caller's org
+GET    /v2/envs/{name}                       # state of one named env
+POST   /v2/envs/{name}:cancel                # cancel an in-flight env provision
+DELETE /v2/envs/{name}                       # tear down a named env
 
 POST   /v2/builds                            # v0: 403 tier-not-entitled for all tiers
 GET    /v2/builds                            # list builds for caller's org (cursor-paginated)
@@ -329,17 +330,33 @@ GET    /v2/.well-known/cli-min-version       # {"min": "0.4.0"} — for soft-dep
 }
 ```
 
-**`POST /v2/env`** — provision env
+**`POST /v2/envs`** — provision a named env
 
 ```json
 // request
-{ "backend": "cassandra-basic", "chat_id": "..." }
+{
+  "env_name": "dev",
+  "backend": "cassandra-basic",
+  "chat_id": "...",
+  "m2m_with_admin_role": false
+}
 
-// response 202
-{ "env_id": "<entity_id>", "namespace": "client-<org_slug>-<hash>", "state": "PROCESSING" }
+// response 202 (also 200 on idempotent replay)
+{
+  "env_id": "<uuid>",
+  "env_name": "dev",
+  "namespace": "cl-<caas_org_id>-dev",
+  "app_namespace": "cl-app-<caas_org_id>-dev",
+  "cyoda_env_url": "https://cl-<caas_org_id>-dev.kube3.cyoda.org",
+  "m2m_client_id": "<m2m-id-or-empty>",
+  "state": "Queued",
+  "creation_date": "2026-05-04T10:00:00Z"
+}
 ```
 
-`backend` must be in `tier_policy[tier].backends`. Server maps `backend` → pipeline name via `CYODA_ENV_PIPELINE_BACKEND_MAP`.
+`env_name` is required and validated server-side: lowercase DNS-1123 label, max 22 chars, no trailing or consecutive hyphens, not in the reserved set (`default`, `kube-system`, `kube-public`, `kube-node-lease`, anything matching the `app-`/`cl-` prefix). `backend` must be in `tier_policy[tier].backends`. Server maps `backend` → pipeline name via `CYODA_ENV_PIPELINE_BACKEND_MAP`. `m2m_with_admin_role` is optional; when true the bootstrap-minted M2M client also receives the ADMIN role on the env (gated server-side by the `cyoda.security.web.jwt.m2m.admin-role-enabled` feature flag).
+
+Two envs from the same org with distinct `env_name` values create two distinct entities and two distinct K8s namespaces. Re-issuing the same `env_name` with the same `Idempotency-Key` and same body replays (200 + the existing env_id). Same key, different body → 409 idempotency-conflict. Different key, same `env_name` (while a non-terminal env with that name still exists) → 409 env-already-exists with the leader's `env_id` in the problem document. Both 409s map to CLI exit code 8 (CodeConflict) — see §6.6.
 
 **`POST /v2/builds`** — v0: returns `403 tier-not-entitled` for every public tier. The endpoint shape is reserved:
 
@@ -391,9 +408,13 @@ If state isn't terminal, fires the `check_job_state` workflow transition — deb
 
 **`DELETE /v2/builds/{id}`** — v0: 403 tier-not-entitled.
 
-**`DELETE /v2/env`** — triggers `CYODA_ENV_TEARDOWN_PIPELINE_V2`. Returns 202. Refused with 409 if any user-app is still deployed in the org's app namespace; problem document includes a remediation hint. (In v0 there cannot be a deployed app, but the check stays defensively in.)
+**`GET /v2/envs`** — list envs for the caller's org. Returns an array of env summaries (`env_id`, `env_name`, `namespace`, `state`, `creation_date`). By default terminal-state envs are excluded; pass `?include_terminal=true` to surface torn-down or stuck envs (audit views).
 
-**`POST /v2/env:cancel`** — symmetrical to env teardown.
+**`GET /v2/envs/{name}`** — state of one named env. Returns the same shape as a successful `POST /v2/envs` response. 404 with `Problem` when no env with that name exists in the caller's org.
+
+**`DELETE /v2/envs/{name}`** — triggers `CYODA_ENV_TEARDOWN_PIPELINE_V2` for the named env. Returns 202.
+
+**`POST /v2/envs/{name}:cancel`** — symmetrical to env teardown for the named env. Returns 202 on success; 404 if no env with that name exists; 409 if the env is in a non-cancellable (terminal) state.
 
 ### 4.4 Error shape (RFC 7807)
 
@@ -558,12 +579,12 @@ The contract was confirmed by the cyoda-go implementors and is pinned here as th
 
 - **TX_post conflict.** If a concurrent transaction modified the entity between TX_pre and TX_post, TX_post fails once with `ErrConflict` (409 retryable); cascade halts; entity remains durable in pre-callout state. **No engine retry, no engine-side compensation transition.** Application-layer is responsible for cleanup of any external side-effects already initiated. The manager addresses this with the `Queued` state design (§5.5.3) and the orphan-reconciliation CronJob (§5.5.4).
 - **No engine re-dispatch.** If the dispatched call fails (timeout, compute-member crash, partition), TX_post never opens, entity remains in pre-callout state, cascade halts. Recovery is *client-side*: the caller re-issues the original API call, restarting the cascade with a fresh dispatch ID. Each retry is a fresh dispatch — dispatch IDs are not stable across retries. Processors that need deduplication must do it on application-meaningful keys (e.g. `cyoda_entity_id` searched via TeamCity locator), not on the dispatch ID.
-- **Processor `success=false`.** Same as `SYNC` failure: `WORKFLOW_FAILED` (400), entity stays in pre-callout, cascade halts. No automatic compensation. The manager surfaces the failure via `GET /v2/env` reading the entity's pre-callout state.
+- **Processor `success=false`.** Same as `SYNC` failure: `WORKFLOW_FAILED` (400), entity stays in pre-callout, cascade halts. No automatic compensation. The manager surfaces the failure via `GET /v2/envs/{name}` reading the entity's pre-callout state.
 - **Idempotency-skip return shape.** `success=true, payload.data=null` preserves the entity's `data` field but **still commits TX_post** with the new state and a new transaction id. There is no engine-side "no-op success" that skips TX_post entirely. For true no-ops (no version bump, no state change), the right pattern is a pre-dispatch transition criterion that refuses the transition. The manager uses transition criteria for state-progression routing (`$.job_status == "SUCCESS"` etc.) but *not* for idempotency dedup, because the natural dedup point (entity has a `build_id` already) only exists after the first successful dispatch.
 - **`responseTimeoutMs`.** Per-processor wall-clock budget for the dispatched call between `TX_pre.Commit` and `TX_post.Begin`. Same field, same semantics as for `SYNC` mode.
 - **`startNewTxOnDispatch`.** Separate processor config attribute, defaults to `false`. Left at default.
 
-**Idempotency requirement.** Because the engine doesn't re-dispatch, idempotency is needed primarily for **client-driven retry** (CLI re-issues `POST /v2/env` after a transport failure or after manual operator intervention). The HTTP layer's `Idempotency-Key` (§4.5) handles request-level replay; the processor-level idempotency check uses `cyoda_entity_id` as a TeamCity locator (§5.5.2).
+**Idempotency requirement.** Because the engine doesn't re-dispatch, idempotency is needed primarily for **client-driven retry** (CLI re-issues `POST /v2/envs` after a transport failure or after manual operator intervention). The HTTP layer's `Idempotency-Key` (§4.5) handles request-level replay; the processor-level idempotency check uses `cyoda_entity_id` as a TeamCity locator (§5.5.2).
 
 #### 5.5.2 The four processors
 
@@ -614,20 +635,20 @@ Transitions:
 
 | Transition | start → end | automated | Processor | executionMode | responseTimeoutMs | Notes |
 |---|---|---|---|---|---|---|
-| *(entity create)* | — → `Queued` | n/a | — | — | — | HTTP `POST /v2/env` handler creates entity directly in `Queued` with `pipeline_name`, `properties`, `cyoda_namespace`, `owner_org_id`, `owner_user_id`, `api_version="v2"`, `idempotency_key`, `request_hash`. No processor; durable on commit. |
+| *(entity create)* | — → `Queued` | n/a | — | — | — | HTTP `POST /v2/envs` handler creates entity directly in `Queued` with `pipeline_name`, `properties`, `cyoda_namespace`, `owner_org_id`, `owner_user_id`, `env_name`, `api_version="v2"`, `idempotency_key`, `request_hash`. No processor; durable on commit. |
 | `dispatch_teamcity_job` | `Queued` → `Job_Scheduled` | **yes** | `process_schedule_teamcity_job` | `COMMIT_BEFORE_DISPATCH` | 30000 | Engine fires automatically once entity lands in `Queued`. Processor: locator-search dedup (recovers from crash); trigger if not found; stamp `build_id`. |
-| `check_job_state` | `Job_Scheduled` → `Job_Scheduled` | no (manual; CLI `--wait` invokes via `GET /v2/env`) | `process_check_job_state` | `COMMIT_BEFORE_DISPATCH` | 5000 | Polls TeamCity. Mutates `job_status`, `job_status_text`, `statistics`. 10 s debounce. |
+| `check_job_state` | `Job_Scheduled` → `Job_Scheduled` | no (manual; CLI `--wait` invokes via `GET /v2/envs/{name}`) | `process_check_job_state` | `COMMIT_BEFORE_DISPATCH` | 5000 | Polls TeamCity. Mutates `job_status`, `job_status_text`, `statistics`. 10 s debounce. |
 | `mark_job_successful` | `Job_Scheduled` → `Job_Successful` | yes | none | — | — | Criterion `simple` `$.job_status == "SUCCESS"`. |
-| `mark_job_failed` | `Job_Scheduled` → `Job_Failed` | yes | none | — | — | Criterion `simple` `$.job_status == "FAILURE"`. Fires when *TeamCity* reports failure (after a successful processor return that mutated `job_status`). Does NOT fire on processor-level failures — those leave the entity in pre-callout (`Queued` or `Job_Scheduled`); the v2 HTTP handler surfaces them via `GET /v2/env`. |
-| `cancel_queued` | `Queued` → `Job_Cancelled` | no (manual; `POST /v2/env:cancel`) | none | — | — | No TeamCity to cancel — dispatch hasn't fired yet, or its TX_post is racing this. If dispatch already triggered TeamCity but lost the CAS race, the orphan-reconciliation CronJob (§5.5.4) cleans up. |
-| `cancel_teamcity_job` | `Job_Scheduled` → `Job_Cancelled` | no (manual; `POST /v2/env:cancel`) | `process_cancel_teamcity_job` | `SYNC` | 5000 | Reads `build_id`; calls TeamCity cancel. Also performs a locator search by `cyoda_entity_id` to catch any orphan from an earlier `Queued` race. |
-| `env_teardown` | `Job_Successful` → `Env_Torn_Down` | no (manual; `DELETE /v2/env`) | `process_env_teardown` | `SYNC` | 10000 | Precondition: app namespace empty (refused with 409 otherwise). Triggers `CYODA_ENV_TEARDOWN_PIPELINE_V2`. |
+| `mark_job_failed` | `Job_Scheduled` → `Job_Failed` | yes | none | — | — | Criterion `simple` `$.job_status == "FAILURE"`. Fires when *TeamCity* reports failure (after a successful processor return that mutated `job_status`). Does NOT fire on processor-level failures — those leave the entity in pre-callout (`Queued` or `Job_Scheduled`); the v2 HTTP handler surfaces them via `GET /v2/envs/{name}`. |
+| `cancel_queued` | `Queued` → `Job_Cancelled` | no (manual; `POST /v2/envs/{name}:cancel`) | none | — | — | No TeamCity to cancel — dispatch hasn't fired yet, or its TX_post is racing this. If dispatch already triggered TeamCity but lost the CAS race, the orphan-reconciliation CronJob (§5.5.4) cleans up. |
+| `cancel_teamcity_job` | `Job_Scheduled` → `Job_Cancelled` | no (manual; `POST /v2/envs/{name}:cancel`) | `process_cancel_teamcity_job` | `SYNC` | 5000 | Reads `build_id`; calls TeamCity cancel. Also performs a locator search by `cyoda_entity_id` to catch any orphan from an earlier `Queued` race. |
+| `env_teardown` | `Job_Successful` → `Env_Torn_Down` | no (manual; `DELETE /v2/envs/{name}`) | `process_env_teardown` | `SYNC` | 10000 | Precondition: app namespace empty (refused with 409 otherwise). Triggers `CYODA_ENV_TEARDOWN_PIPELINE_V2`. |
 
 The `Queued` state is the load-bearing change. It eliminates the recovery-from-`None` cliff: a compute-member crash mid-`dispatch_teamcity_job` leaves the entity durable in `Queued` with all dispatch parameters present, and the next `dispatch_teamcity_job` invocation (engine replay or defensive sweep) re-runs the processor, which finds the orphaned TeamCity build via locator and recovers cleanly without duplicating it.
 
 **Crash-recovery walkthrough.** Compute member crashes between TeamCity REST trigger and processor return. TeamCity has build 12345; the entity is in `Queued` (TX_pre committed, TX_post never opened). On client retry (or on engine automated-transition replay), `dispatch_teamcity_job` fires again. The processor's locator search by `cyoda_entity_id` finds build 12345; processor returns `success=true, payload.data={build_id: "12345", job_state: "PROCESSING"}` without triggering a duplicate; TX_post commits at `Job_Scheduled`. Self-healing.
 
-**Cancel-race walkthrough.** User fires `POST /v2/env:cancel` while engine is firing `dispatch_teamcity_job`. Two paths:
+**Cancel-race walkthrough.** User fires `POST /v2/envs/{name}:cancel` while engine is firing `dispatch_teamcity_job`. Two paths:
 
 - **Cancel wins CAS:** `cancel_queued` commits at `Job_Cancelled`. Dispatch processor's TX_post then fails with 409. The TeamCity build (if already triggered) is orphaned — handled by §5.5.4.
 - **Dispatch wins CAS:** `dispatch_teamcity_job`'s TX_post commits at `Job_Scheduled` with `build_id`. `cancel_queued` fails (state moved). User's CLI sees 409 and retries; `cancel_teamcity_job` from `Job_Scheduled` succeeds with the persisted `build_id`.
@@ -786,10 +807,11 @@ cyoda-cloud logout
 cyoda-cloud whoami [--output json]
 cyoda-cloud token print --show
 
-cyoda-cloud env up    [--backend <type>] [--wait] [--idempotency-key <key>]
-cyoda-cloud env status
-cyoda-cloud env cancel
-cyoda-cloud env down  [--wait]
+cyoda-cloud env up     <name> [--backend <type>] [--wait] [--idempotency-key <key>] [--m2m-with-admin-role]
+cyoda-cloud env list   [--include-terminal]
+cyoda-cloud env status <name>
+cyoda-cloud env cancel <name>
+cyoda-cloud env down   <name> [--wait]
 
 cyoda-cloud app build  ...     # v0: 403 tier-not-entitled
 cyoda-cloud app deploy ...     # v0: 403 tier-not-entitled
@@ -932,7 +954,7 @@ Each step independently shippable.
 6. **Tier policy + middleware.** `internal/tier`, `RequireTier`, ConfigMap loader, startup gate on `deploy_app: true` / `TOKEN_EXCHANGE_ENABLED`. End state: tier-blocked endpoints fail-fast.
 7. **Quota.** `internal/quota` direct-search-based. `GET /v2/me` returns real usage.
 8. **Compute-member gRPC client.** `internal/cyoda/compute` opens the outbound stream to cyoda-go's `CloudEventsService.startStreaming`, dispatches inbound `EntityProcessorCalculationRequest` events to the four processor handlers. Reconnect/backoff and 30s keepalive handling. Integration-tested with a real cyoda-go instance dispatching synthetic processor calls.
-9. **Env endpoints.** `POST /v2/env`, `GET /v2/env`, `POST /v2/env:cancel`, `DELETE /v2/env`. TeamCity client + processors + Ansible discipline (Section 5.9 + 7.3). End state: real envs provision and tear down. **Hard dependency on step 8** — env endpoints write the `deploy` entity, which fires the workflow, which dispatches `process_schedule_teamcity_job` to the compute member. Step 9 cannot ship until step 8 is operational. Includes the orphan-reconciliation CronJob (§5.5.4).
+9. **Env endpoints.** `POST /v2/envs`, `GET /v2/envs`, `GET /v2/envs/{name}`, `POST /v2/envs/{name}:cancel`, `DELETE /v2/envs/{name}`. TeamCity client + processors + Ansible discipline (Section 5.9 + 7.3). End state: real envs provision and tear down. **Hard dependency on step 8** — env endpoints write the `deploy` entity, which fires the workflow, which dispatches `process_schedule_teamcity_job` to the compute member. Step 9 cannot ship until step 8 is operational. Includes the orphan-reconciliation CronJob (§5.5.4).
 10. **List + single-build endpoints.** `GET /v2/builds`, `GET /v2/builds/{id}`. Forged-cursor regression test.
 11. **Tier-blocked app endpoints.** `POST /v2/builds`, etc. — all return 403 tier-not-entitled. End state: surface complete, contract forward-compatible.
 12. **Discovery + min-version.** `/v2/.well-known/openapi.json`, `/v2/.well-known/cli-min-version`.
@@ -947,8 +969,8 @@ Steps 1-3 are foundational and can land before the public hostname is even alloc
 |---|---|---|
 | Long-running env pipelines fail near the end on token expiry. | Accept for v0 (env playbooks sub-30 min). RFC 8693 token-exchange on the contract-tier roadmap. | accepted |
 | `COMMIT_BEFORE_DISPATCH` schedule-vs-cancel race orphans a TeamCity build. | When cancel wins the CAS, dispatch's TX_post fails 409 with TeamCity already triggered. The orphan-reconciliation CronJob (§5.5.4) cancels orphaned builds within 5 minutes. `process_cancel_teamcity_job` also performs a locator search by `cyoda_entity_id` and cancels eagerly when invoked from the `Job_Scheduled` path. | mitigated |
-| Compute-member crash mid-processor leaves entity stuck. **No engine re-dispatch** per cyoda-go v0.7.0 contract. | The `Queued` state design (§5.5.3) makes the entity durable in pre-callout state with all dispatch parameters. Recovery: client retry of `POST /v2/env` with the same `Idempotency-Key` replays through the HTTP idempotency layer, fires a fresh `dispatch_teamcity_job`; processor's locator search by `cyoda_entity_id` finds and adopts the orphaned TeamCity build without duplicating. Defensive sweep in §5.5.4 nudges replays on entities stuck in `Queued` past 10 min. | mitigated |
-| `process_schedule_teamcity_job` returns `success=false`. Engine halts cascade at pre-callout (`Queued`) per v0.7.0 contract — no automatic compensation. | v2 HTTP handler reads the entity's pre-callout state on `GET /v2/env` and surfaces the failure (last error captured at handler-side from the gRPC response if available; otherwise generic "schedule failed, retry"). User can re-issue via CLI. | mitigated |
+| Compute-member crash mid-processor leaves entity stuck. **No engine re-dispatch** per cyoda-go v0.7.0 contract. | The `Queued` state design (§5.5.3) makes the entity durable in pre-callout state with all dispatch parameters. Recovery: client retry of `POST /v2/envs` with the same `Idempotency-Key` replays through the HTTP idempotency layer, fires a fresh `dispatch_teamcity_job`; processor's locator search by `cyoda_entity_id` finds and adopts the orphaned TeamCity build without duplicating. Defensive sweep in §5.5.4 nudges replays on entities stuck in `Queued` past 10 min. | mitigated |
+| `process_schedule_teamcity_job` returns `success=false`. Engine halts cascade at pre-callout (`Queued`) per v0.7.0 contract — no automatic compensation. | v2 HTTP handler reads the entity's pre-callout state on `GET /v2/envs/{name}` and surfaces the failure (last error captured at handler-side from the gRPC response if available; otherwise generic "schedule failed, retry"). User can re-issue via CLI. | mitigated |
 | TX_post `payload.data=null` idempotency-skip still bumps version and races other writers. | Per v0.7.0 contract, TX_post always commits when processor returns `success`. The schedule processor's locator-recovery path returns `payload.data={build_id, job_state}` so the state advance to `Job_Scheduled` is intentional. The check-state processor naturally returns updated fields. No skip-without-state-change path is used. | accepted |
 | Slug collision between distinct `caas_org_id` values. | `DeriveNamespace` 8-hex sha256 suffix + DNS-1123 validation; fuzz tests. | eliminated |
 | Cursor IDOR via forged cursor. | Ownership filter always re-injected from principal; cursor is opaque tiebreak only. Regression test asserts. | eliminated |
