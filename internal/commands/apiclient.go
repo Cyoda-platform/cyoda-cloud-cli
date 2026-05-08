@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -136,7 +137,12 @@ func newAuthenticatedClient(profile keychain.Profile, d config.Discovery) (*api.
 	// wire after token refresh / 401 retry. Zero overhead when disabled.
 	debugEnabled := api.IsDebugEnabled(os.Getenv(api.EnvDebug))
 	rt := api.WrapDebug(tr, os.Stderr, debugEnabled)
-	httpClient := &http.Client{Transport: rt}
+	// Per-request safety net: a server that completes TLS but never
+	// responds would otherwise hang indefinitely (a context-only
+	// approach trusts every caller to set a deadline). The --wait
+	// poll loops set their own per-iteration ctx deadline well under
+	// 60s, so this ceiling does not constrain them.
+	httpClient := &http.Client{Transport: rt, Timeout: 60 * time.Second}
 	cli, err := api.NewClientWithResponses(d.APIURL, api.WithHTTPClient(httpClient))
 	if err != nil {
 		return nil, nil, err
