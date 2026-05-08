@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
-// EnvDebug is the environment variable that, when set to a truthy value
-// (anything non-empty other than "0", "false", "no"), enables HTTP debug
-// logging via WrapDebug. Documented for users so it can be flipped without
-// reading source.
+// EnvDebug is the environment variable that, when set to one of the canonical
+// truthy values ("1", "true", "yes", "on" — case-insensitive), enables HTTP
+// debug logging via WrapDebug. Documented for users so it can be flipped
+// without reading source.
 const EnvDebug = "CYODA_CLOUD_DEBUG"
 
 // debugTransport wraps an underlying RoundTripper, writing a trace of each
@@ -127,12 +128,15 @@ func (d *debugTransport) writeBodyBytes(buf []byte, contentLength int64) {
 }
 
 // IsDebugEnabled reports whether v is a truthy value for EnvDebug. Centralised
-// so the parsing rule lives in one place: any non-empty string except a small
-// "off" allowlist enables debug.
+// so the parsing rule lives in one place: a strict allowlist of canonical
+// truthy tokens ("1", "true", "yes", "on") matched case-insensitively. Any
+// other value — empty, unknown, typo — is off. The allowlist (rather than
+// "everything except an off-list") is the safer default: a fat-fingered
+// "fasle" or "of" cannot accidentally enable a verbose debug trace.
 func IsDebugEnabled(v string) bool {
-	switch v {
-	case "", "0", "false", "no", "off":
-		return false
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
 	}
-	return true
+	return false
 }

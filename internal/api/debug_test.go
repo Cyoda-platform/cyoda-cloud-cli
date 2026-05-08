@@ -128,17 +128,29 @@ func TestDebugTransport_TruncatesLargeBody(t *testing.T) {
 }
 
 func TestIsDebugEnabled(t *testing.T) {
+	// Strict allowlist: only canonical truthy tokens (case-insensitive)
+	// enable debug. Anything else — empty, unknown, typo — is off.
+	// This is safer than the inverse "everything except a small off-list"
+	// rule, which silently treats "fasle"/"of"/etc. as truthy.
 	cases := map[string]bool{
 		"":      false,
 		"0":     false,
 		"false": false,
+		"FALSE": false,
 		"no":    false,
 		"off":   false,
-		"1":     true,
-		"true":  true,
-		"yes":   true,
-		"on":    true,
-		"foo":   true, // any non-empty non-"off" value enables
+		"foo":   false, // unknown — off
+		"2":     false, // not in allowlist
+
+		"1":    true,
+		"true": true,
+		"yes":  true,
+		"on":   true,
+		// Case-insensitive over the allowlist:
+		"TRUE": true,
+		"Yes":  true,
+		"ON":   true,
+		"True": true,
 	}
 	for in, want := range cases {
 		if got := IsDebugEnabled(in); got != want {
