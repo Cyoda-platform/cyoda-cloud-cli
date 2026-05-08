@@ -258,6 +258,66 @@ func TestWhoami_RefreshTokenExpiredMapsExitThree(t *testing.T) {
 	}
 }
 
+// TestWhoami_Non2xxMapsToCLIError is the regression for CR Important #1:
+// a 5xx from /v2/me must map through problemToError to a *output.CLIError
+// with CodeUpstreamFailure (exit 9), not a bare fmt.Errorf that falls
+// through to the generic exit 1.
+func TestWhoami_Non2xxMapsToCLIError(t *testing.T) {
+	setupFileFallback(t)
+
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/me" {
+			http.NotFound(w, r)
+			return
+		}
+		// 503 Service Unavailable — manager is down. /v2/me does not
+		// declare a Problem body in OpenAPI, so the response has no
+		// problem+json; whoami must still map to CodeUpstreamFailure
+		// purely from the status.
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+	}))
+	defer apiSrv.Close()
+
+	stubDiscoveryFile(t, apiSrv.URL)
+	_, cleanup := stubAuth0Token(t, "AT-fresh")
+	defer cleanup()
+
+	if err := keychain.Store(keychain.Profile{
+		Org:           "",
+		RefreshToken:  "RT0",
+		APIURL:        apiSrv.URL,
+		Auth0Domain:   "ignored.example",
+		Auth0ClientID: "client-id",
+		Auth0Audience: "https://api.cyoda.cloud",
+	}); err != nil {
+		t.Fatalf("seed keychain: %v", err)
+	}
+
+	cmd := NewWhoamiCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected 503 to produce error, got nil")
+	}
+	var cerr *output.CLIError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err should be *output.CLIError (got %T): %v", err, err)
+	}
+	if cerr.Code != output.CodeUpstreamFailure {
+		t.Errorf("CLIError.Code = %d, want %d (UpstreamFailure)",
+			cerr.Code, output.CodeUpstreamFailure)
+	}
+	if got := output.Exit(err); got != 9 {
+		t.Errorf("output.Exit = %d, want 9 (CodeUpstreamFailure)", got)
+	}
+}
+
 // TestWhoami_DefaultOrgFromConfig verifies that with default_org="abc" in
 // config.toml and no --org flag, the resolved org reaches BuildAPIClient
 // (and therefore keychain.Load). We seed the keychain only under "abc" — if
