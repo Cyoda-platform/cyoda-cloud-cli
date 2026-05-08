@@ -27,22 +27,35 @@ gated by `//go:build !ci`; the file-fallback test runs everywhere. Run
 both forms before declaring done (Gate 5).
 
 ### Gate 3: Security by default
-Never log access tokens, refresh tokens, code verifiers, state values,
-idempotency keys, or any other secret at any level. The auth flow assumes
-secrets only flow through `internal/auth` and `internal/keychain`; if
-something leaks them outside those boundaries (e.g. an error string
-embeds Auth0's `error_description` verbatim), that's a bug.
+**Default**: never log, print, or persist access tokens, refresh tokens,
+code verifiers, state values, idempotency keys, or any other secret.
+Secrets flow only through `internal/auth` and `internal/keychain`; an
+error string embedding Auth0's `error_description` verbatim, a debug
+log capturing a request body that contains a code verifier, etc.,
+are bugs.
 
-`internal/api/debug.go` redacts `Authorization`, `Cookie`, `Set-Cookie`,
-and `Proxy-Authorization` headers when `CYODA_CLOUD_DEBUG=1` is set.
-Never bypass that redaction. If you add a new sensitive header, extend
-the redaction list in the same commit.
+**Exception — explicit user opt-in.** A user who deliberately asks to
+see a secret may be shown it. Today that's:
+- `cyoda-cloud token print --show` — refuses without `--show`; with the
+  flag, prints the access token to stderr.
+- `CYODA_CLOUD_DEBUG=1` — enables the debug RoundTripper; redacts
+  `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` but
+  prints request and response bodies (which may carry idempotency keys
+  or env names — the user requested the trace).
 
-Validate input at boundaries: `--idempotency-key` length, env-name DNS-1123
-rules in `internal/envname/`, discovery URL scheme allowlist
+When introducing a new "show me the secret" path: require explicit
+opt-in via flag or env var, document the exposure in the help text /
+godoc, and route output to **stderr** (so `2>/dev/null` suppresses
+without losing functional output on stdout).
+
+When introducing a new sensitive header, extend the redaction list in
+`internal/api/debug.go` in the same commit.
+
+Validate input at boundaries: `--idempotency-key` length, env-name
+DNS-1123 rules in `internal/envname/`, discovery URL scheme allowlist
 (`https://`/`file://` only — no cleartext `http://` without
-`CYODA_CLOUD_INSECURE_DISCOVERY=1`). Server is authoritative — client-side
-checks are best-effort early-fail.
+`CYODA_CLOUD_INSECURE_DISCOVERY=1`). Server is authoritative —
+client-side checks are best-effort early-fail.
 
 ### Gate 4: Documentation hygiene
 When changing the command surface (commands, flags, exit codes, output
@@ -63,11 +76,11 @@ Use `superpowers:verification-before-completion` skill before claiming work is c
 Run all five before declaring green:
 
 ```
-GOTOOLCHAIN=local go test -race -timeout 60s ./...
-GOTOOLCHAIN=local go test -race -timeout 60s -tags ci ./...
-GOTOOLCHAIN=local go vet ./...
-GOTOOLCHAIN=local go build ./...
-GOTOOLCHAIN=local go generate ./internal/api/... && git diff --exit-code
+go test -race -timeout 60s ./...
+go test -race -timeout 60s -tags ci ./...
+go vet ./...
+go build ./...
+go generate ./internal/api/... && git diff --exit-code
 ```
 
 The `-tags ci` form excludes the OS-keychain test that cannot run on a
@@ -109,9 +122,8 @@ state vocabulary the CLI's `--wait` poll observes (e.g. `Ready`,
 
 ## Go Conventions
 
-- Go 1.22+ (the module's `go` directive). Use `GOTOOLCHAIN=local` for all
-  go commands so a newer host toolchain doesn't auto-bump the directive
-  in `go.mod` / `go.sum`.
+- Go 1.26+ (the module's `go` directive). Newer language features and
+  stdlib behaviour are fair game.
 - Manual dependency injection via constructors. No DI frameworks.
 - Wrap errors with context: `fmt.Errorf("failed to X: %w", err)`.
   Errors that should map to a specific spec §6.6 exit code are
@@ -159,12 +171,12 @@ Review and security audit prevent defects reaching main.
 
 Single Go module — no plugin submodules.
 
-- Test: `GOTOOLCHAIN=local go test -race -timeout 60s ./...`
-- Test (CI subset, no host keychain): `GOTOOLCHAIN=local go test -race -tags ci -timeout 60s ./...`
-- Vet: `GOTOOLCHAIN=local go vet ./...`
-- Build: `GOTOOLCHAIN=local make build` (produces `./bin/cyoda-cloud`)
-- Regenerate API client: `GOTOOLCHAIN=local go generate ./internal/api/...` (run after re-vendoring `api/openapi/openapi.yaml`)
-- Tidy: `GOTOOLCHAIN=local go mod tidy`
+- Test: `go test -race -timeout 60s ./...`
+- Test (CI subset, no host keychain): `go test -race -tags ci -timeout 60s ./...`
+- Vet: `go vet ./...`
+- Build: `make build` (produces `./bin/cyoda-cloud`)
+- Regenerate API client: `go generate ./internal/api/...` (run after re-vendoring `api/openapi/openapi.yaml`)
+- Tidy: `go mod tidy`
 - Lint: `golangci-lint run` (CI runs it; install locally only to mirror)
 - Validate release config: `goreleaser check`
 
