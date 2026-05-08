@@ -169,16 +169,16 @@ func runAppBuildOrDeploy(cmd *cobra.Command, f appCommonFlags, a appBuildArgs, a
 	}
 
 	snap := &output.BuildSnapshot{
-		BuildId: derefString(resp.JSON202.BuildId),
+		BuildID: derefString(resp.JSON202.BuildId),
 		Action:  string(action),
 		State:   derefString(resp.JSON202.State),
 		// branch is request-side; preserve so the user sees it in the table.
 		BranchName: a.branch,
 	}
 
-	if a.wait && snap.BuildId != "" {
+	if a.wait && snap.BuildID != "" {
 		if !output.IsTerminalState(snap.State) {
-			final, err := waitForBuildTerminal(cmd, cli, snap.BuildId)
+			final, err := waitForBuildTerminal(cmd, cli, snap.BuildID)
 			if err != nil {
 				return err
 			}
@@ -473,14 +473,14 @@ func buildToSnapshot(b *api.Build) output.BuildSnapshot {
 		createdAt = b.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
 	}
 	return output.BuildSnapshot{
-		BuildId:       b.BuildId,
+		BuildID:       b.BuildId,
 		Action:        derefString(b.Action),
 		State:         b.State,
 		CreatedAt:     createdAt,
 		JobStatus:     derefString(b.JobStatus),
 		JobStatusText: derefString(b.JobStatusText),
 		PipelineName:  derefString(b.PipelineName),
-		ChatId:        derefString(b.ChatId),
+		ChatID:        derefString(b.ChatId),
 	}
 }
 

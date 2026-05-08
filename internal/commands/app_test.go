@@ -218,8 +218,8 @@ func TestAppList_GETsAndRendersItems(t *testing.T) {
 	if got.NextCursor != "cur123" {
 		t.Errorf("next_cursor = %q, want cur123", got.NextCursor)
 	}
-	if got.Items[0].BuildId != "b1" {
-		t.Errorf("items[0].BuildId = %q", got.Items[0].BuildId)
+	if got.Items[0].BuildID != "b1" {
+		t.Errorf("items[0].BuildID = %q", got.Items[0].BuildID)
 	}
 }
 
