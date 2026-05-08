@@ -49,7 +49,11 @@ jobs:
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6.1.0
         with:
-          version: latest
+          # Pin both the action and the GoReleaser binary it installs.
+          # The action is a thin shim; `version: latest` would let the
+          # binary at tag-push time be whatever's "latest" then —
+          # an unreviewed dep upgrade on every release. Pin both.
+          version: v2.15.4
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
