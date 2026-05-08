@@ -25,7 +25,7 @@ jobs:
 
       - uses: actions/setup-go@v5.2.0
         with:
-          go-version: '1.26.x'
+          go-version: '1.26.1'
           cache: true
 
       - name: Fetch served OpenAPI
