@@ -30,9 +30,15 @@ jobs:
 
       - name: Fetch served OpenAPI
         # The manager exposes the spec as JSON; we vendor YAML, so convert.
-        # Until the manager is reachable on the public DNS name, this step is
-        # tolerated as a no-op so main stays green. Once api.cyoda.cloud is
-        # live the curl succeeds and drift is detected by the diff step below.
+        #
+        # TODO(openapi-drift): remove the tolerance branch (the `else echo
+        # warning` arm) once api.cyoda.cloud is reachable. Verified
+        # 2026-05-08: the host does not yet resolve, so without tolerance
+        # this step would fail every push. Track removal against the
+        # production-manager DNS go-live milestone — once
+        #   curl -fsSL https://api.cyoda.cloud/v2/.well-known/openapi.json
+        # succeeds from a generic ubuntu runner, the workflow should fail
+        # on a fetch error rather than warn.
         run: |
           set -euo pipefail
           mkdir -p api/openapi
