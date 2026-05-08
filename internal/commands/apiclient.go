@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"runtime"
 
 	"github.com/spf13/cobra"
@@ -129,7 +130,13 @@ func newAuthenticatedClient(profile keychain.Profile, d config.Discovery) (*api.
 		CLIVersion: version.Version,
 		UserAgent:  version.UserAgent(version.Version, runtime.GOOS, runtime.GOARCH),
 	}
-	httpClient := &http.Client{Transport: tr}
+	// Optional outermost wrapper: when CYODA_CLOUD_DEBUG is truthy, log the
+	// request and response (with Authorization redacted) to stderr. Sits
+	// outside the auth Transport so the trace shows what's actually on the
+	// wire after token refresh / 401 retry. Zero overhead when disabled.
+	debugEnabled := api.IsDebugEnabled(os.Getenv(api.EnvDebug))
+	rt := api.WrapDebug(tr, os.Stderr, debugEnabled)
+	httpClient := &http.Client{Transport: rt}
 	cli, err := api.NewClientWithResponses(d.APIURL, api.WithHTTPClient(httpClient))
 	if err != nil {
 		return nil, nil, err
