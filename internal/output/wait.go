@@ -125,21 +125,34 @@ func PollUntilTerminal(ctx context.Context, fn PollFunc, opts WaitOpts) (string,
 	}
 }
 
-// IsTerminalState reports whether s is a terminal state per spec §4.3
-// (SUCCESS, FAILED, CANCELLED). Both env and app entities share this
-// vocabulary. Non-matching states are non-terminal — the caller's poll loop
-// will either reach its total deadline or, for teardown, observe the 404
-// that signals completion.
+// IsTerminalState reports whether s is a terminal entity state.
 //
-// We deliberately avoid speculatively accepting other vocabularies (e.g.
-// READY/ERROR/DELETED). If the server emits something else we'll find out
-// from real usage and add it explicitly here. Speculative acceptance hides
-// bugs. If a future divergence emerges (env adds DELETED, app keeps the
-// SUCCESS-set), the call site can pass its own predicate inline — no helper
-// needed for a one-line check.
+// The CLI accepts two vocabularies:
+//
+//   - **Legacy upper-case** (SUCCESS, FAILED, CANCELLED) — the
+//     vocabulary used by build/deploy entities and by the v0 single-env
+//     API surface.
+//   - **TitleCase workflow names** (Ready, Mint_Failed, Bootstrap_Failed,
+//     Job_Failed, Job_Cancelled, Env_Torn_Down) — the vocabulary the
+//     /v2/envs* surface returns directly from the workflow's terminal
+//     states (see cyoda-cloud-manager spec §4.3 / workflow tables).
+//
+// Non-matching states (Queued, Job_Scheduled, PROCESSING, …) are
+// non-terminal — the caller's poll loop continues until a terminal state
+// or a deadline. For teardown, observing the 404 that signals completion
+// is handled by the caller, not by this predicate.
 func IsTerminalState(s string) bool {
 	switch s {
+	// Legacy / build-entity vocabulary.
 	case "SUCCESS", "FAILED", "CANCELLED":
+		return true
+	// New env-workflow vocabulary.
+	case "Ready",
+		"Mint_Failed",
+		"Bootstrap_Failed",
+		"Job_Failed",
+		"Job_Cancelled",
+		"Env_Torn_Down":
 		return true
 	}
 	return false

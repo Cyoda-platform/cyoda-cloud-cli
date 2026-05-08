@@ -114,11 +114,17 @@ func TestMeTable_Nil(t *testing.T) {
 
 func TestEnvTable_RendersAllFields(t *testing.T) {
 	snap := &EnvSnapshot{
-		EnvId:         "env_abc",
-		Namespace:     "ns_org_acme",
+		EnvID:         "11111111-2222-3333-4444-555555555555",
+		EnvName:       "dev",
+		Namespace:     "cl-fd8fdbd8ec4440c99e722faf1f88f3fd-dev",
+		AppNamespace:  "cl-app-fd8fdbd8ec4440c99e722faf1f88f3fd-dev",
+		CyodaEnvURL:   "https://cl-fd8fdbd8ec4440c99e722faf1f88f3fd-dev.kube3.cyoda.org",
+		M2MClientID:   "m2m-client-id-xyz",
 		State:         "PROCESSING",
 		JobStatus:     "RUNNING",
 		JobStatusText: "rolling out cassandra-basic",
+		CreationDate:  "2026-05-04T10:00:00Z",
+		BuildID:       "tc-build-42",
 	}
 	var buf bytes.Buffer
 	if err := EnvTable(&buf, snap); err != nil {
@@ -126,11 +132,17 @@ func TestEnvTable_RendersAllFields(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"ENV_ID", "env_abc",
-		"NAMESPACE", "ns_org_acme",
+		"ENV_NAME", "dev",
+		"ENV_ID", "11111111-2222-3333-4444-555555555555",
+		"NAMESPACE", "cl-fd8fdbd8ec4440c99e722faf1f88f3fd-dev",
+		"APP_NAMESPACE", "cl-app-fd8fdbd8ec4440c99e722faf1f88f3fd-dev",
+		"CYODA_ENV_URL", "kube3.cyoda.org",
+		"M2M_CLIENT_ID", "m2m-client-id-xyz",
 		"STATE", "PROCESSING",
 		"JOB_STATUS", "RUNNING",
 		"JOB_STATUS_TEXT", "rolling out cassandra-basic",
+		"CREATION_DATE", "2026-05-04T10:00:00Z",
+		"BUILD_ID", "tc-build-42",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("EnvTable output missing %q\n%s", want, out)
@@ -140,8 +152,8 @@ func TestEnvTable_RendersAllFields(t *testing.T) {
 
 func TestEnvTable_OmitsEmptyOptionalFields(t *testing.T) {
 	snap := &EnvSnapshot{
-		EnvId:     "env_abc",
-		Namespace: "ns_x",
+		EnvName:   "dev",
+		Namespace: "cl-x-dev",
 		State:     "PROCESSING",
 	}
 	var buf bytes.Buffer
@@ -149,8 +161,18 @@ func TestEnvTable_OmitsEmptyOptionalFields(t *testing.T) {
 		t.Fatalf("EnvTable: %v", err)
 	}
 	out := buf.String()
-	if strings.Contains(out, "JOB_STATUS") {
-		t.Errorf("EnvTable should omit empty JOB_STATUS row:\n%s", out)
+	for _, omit := range []string{
+		"APP_NAMESPACE", "CYODA_ENV_URL", "M2M_CLIENT_ID",
+		"JOB_STATUS", "JOB_STATUS_TEXT", "CREATION_DATE", "BUILD_ID",
+	} {
+		if strings.Contains(out, omit) {
+			t.Errorf("EnvTable should omit empty %s row:\n%s", omit, out)
+		}
+	}
+	for _, want := range []string{"ENV_NAME", "dev", "STATE", "PROCESSING"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("EnvTable missing required %q\n%s", want, out)
+		}
 	}
 }
 
@@ -158,6 +180,58 @@ func TestEnvTable_Nil(t *testing.T) {
 	var buf bytes.Buffer
 	if err := EnvTable(&buf, nil); err == nil {
 		t.Fatal("EnvTable(nil): expected error, got nil")
+	}
+}
+
+func TestEnvListTable_HappyPath(t *testing.T) {
+	envs := []EnvSnapshot{
+		{
+			EnvName:      "stage",
+			Namespace:    "cl-x-stage",
+			State:        "Job_Scheduled",
+			CreationDate: "2026-05-04T11:00:00Z",
+		},
+		{
+			EnvName:      "dev",
+			Namespace:    "cl-x-dev",
+			State:        "Ready",
+			CreationDate: "2026-05-04T10:00:00Z",
+		},
+	}
+	var buf bytes.Buffer
+	if err := EnvListTable(&buf, envs); err != nil {
+		t.Fatalf("EnvListTable: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"ENV_NAME", "STATE", "NAMESPACE", "CREATION_DATE",
+		"dev", "Ready", "cl-x-dev",
+		"stage", "Job_Scheduled", "cl-x-stage",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("EnvListTable output missing %q\n%s", want, out)
+		}
+	}
+	// Sort by env_name: dev < stage.
+	if i, j := strings.Index(out, "dev"), strings.Index(out, "stage"); i < 0 || j < 0 || i >= j {
+		t.Errorf("EnvListTable rows not sorted by ENV_NAME:\n%s", out)
+	}
+}
+
+func TestEnvListTable_Empty(t *testing.T) {
+	var buf bytes.Buffer
+	if err := EnvListTable(&buf, nil); err != nil {
+		t.Fatalf("EnvListTable(nil): %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"ENV_NAME", "STATE", "NAMESPACE", "CREATION_DATE"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("EnvListTable empty output missing header %q\n%s", want, out)
+		}
+	}
+	// Header only — no row data.
+	if n := strings.Count(out, "\n"); n != 1 {
+		t.Errorf("EnvListTable empty output should have one line (header only), got %d:\n%s", n, out)
 	}
 }
 

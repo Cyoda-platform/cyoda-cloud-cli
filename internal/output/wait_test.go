@@ -164,20 +164,36 @@ func TestPollUntilTerminal_StatusMessages(t *testing.T) {
 	}
 }
 
-// TestIsTerminalState exercises the single shared terminal-state predicate.
-// Both env and app entities use the same spec §4.3 vocabulary
-// (SUCCESS/FAILED/CANCELLED); speculative vocabularies (READY/ERROR/DELETED/
-// TIMEOUT/DEPLOYED) are deliberately rejected. See IsTerminalState's doc.
+// TestIsTerminalState exercises the shared terminal-state predicate.
+//
+// Two vocabularies are accepted (see IsTerminalState's doc):
+//
+//   - Legacy upper-case (SUCCESS/FAILED/CANCELLED) used by build/deploy
+//     entities and the v0 single-env API.
+//   - TitleCase env-workflow names (Ready, Mint_Failed, Bootstrap_Failed,
+//     Job_Failed, Job_Cancelled, Env_Torn_Down) used by /v2/envs*.
+//
+// Intermediate states (Queued, Job_Scheduled, PROCESSING) and
+// case-mismatch variants are non-terminal.
 func TestIsTerminalState(t *testing.T) {
-	terminals := []string{"SUCCESS", "FAILED", "CANCELLED"}
+	terminals := []string{
+		// Legacy.
+		"SUCCESS", "FAILED", "CANCELLED",
+		// New env-workflow vocabulary.
+		"Ready", "Mint_Failed", "Bootstrap_Failed",
+		"Job_Failed", "Job_Cancelled", "Env_Torn_Down",
+	}
 	for _, s := range terminals {
 		if !IsTerminalState(s) {
 			t.Errorf("IsTerminalState(%q) = false, want true", s)
 		}
 	}
 	nonTerminals := []string{
-		"PROCESSING", "PENDING", "QUEUED", "", "success", "failed",
-		"READY", "ERROR", "DELETED", "TIMEOUT", "DEPLOYED",
+		"", "PROCESSING", "PENDING", "QUEUED",
+		"Queued", "Job_Scheduled", "Bootstrap_Pending",
+		// Case-mismatch variants must NOT match.
+		"success", "failed", "ready", "READY",
+		"env_torn_down", "ENV_TORN_DOWN",
 	}
 	for _, s := range nonTerminals {
 		if IsTerminalState(s) {
