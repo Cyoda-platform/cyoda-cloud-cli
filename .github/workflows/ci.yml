@@ -40,6 +40,10 @@ jobs:
         with:
           go-version: 1.26.3
           cache: true
-      - uses: golangci/golangci-lint-action@v6.1.1
+      - uses: golangci/golangci-lint-action@v9.0.0
         with:
-          version: latest
+          # golangci-lint v2.x is built with Go 1.26+; required because go.mod
+          # targets 1.26.3 (golangci-lint refuses to lint a module whose Go
+          # directive is newer than the toolchain it was built with).
+          # action@v9 mandates lint >= v2.1.0; pin both to specific minors.
+          version: v2.12.2
