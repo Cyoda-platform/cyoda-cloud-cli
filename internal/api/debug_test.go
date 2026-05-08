@@ -122,8 +122,46 @@ func TestDebugTransport_TruncatesLargeBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if !strings.Contains(buf.String(), "[truncated,") {
-		t.Errorf("expected truncation marker, got:\n%s", buf.String()[:300])
+	// Response truncation marker must include the actual buffer length.
+	wantMarker := "[truncated, 16384 bytes total]"
+	if !strings.Contains(buf.String(), wantMarker) {
+		t.Errorf("expected response truncation marker %q, got:\n%s", wantMarker, buf.String()[:min(300, len(buf.String()))])
+	}
+}
+
+// TestDebugTransport_TruncatesLargeRequestBody covers the request-side
+// logBody path. The marker must show the actual buffered length, not the
+// (potentially -1 / unknown / stale) Content-Length on the request.
+func TestDebugTransport_TruncatesLargeRequestBody(t *testing.T) {
+	var buf bytes.Buffer
+	big := strings.Repeat("B", 16<<10) // 16 KiB
+	inner := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Status:     "200 OK",
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader("ok")),
+		}, nil
+	})
+	rt := WrapDebug(inner, &buf, true)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://api.example/big", strings.NewReader(big))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Force ContentLength to -1 (unknown) to verify the marker uses the
+	// actual buffered length, not whatever the request claims.
+	req.ContentLength = -1
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	wantMarker := "[truncated, 16384 bytes total]"
+	if !strings.Contains(buf.String(), wantMarker) {
+		t.Errorf("expected request truncation marker %q, got:\n%s", wantMarker, buf.String()[:min(400, len(buf.String()))])
+	}
+	if strings.Contains(buf.String(), "[truncated, -1 ") {
+		t.Errorf("marker leaked the bogus -1 ContentLength:\n%s", buf.String()[:min(400, len(buf.String()))])
 	}
 }
 

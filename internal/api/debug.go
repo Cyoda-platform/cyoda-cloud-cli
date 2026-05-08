@@ -68,7 +68,7 @@ func (d *debugTransport) logRequest(req *http.Request) {
 			fmt.Fprintf(d.out, "  body: <getbody error: %v>\n", err)
 			return
 		}
-		d.logBody(body, req.ContentLength)
+		d.logBody(body)
 	}
 }
 
@@ -106,14 +106,18 @@ func (d *debugTransport) logHeaders(h http.Header) {
 	}
 }
 
-func (d *debugTransport) logBody(r io.ReadCloser, contentLength int64) {
+// logBody buffers a body reader and writes it via writeBodyBytes. The
+// truncation marker uses the actual buffered length — req.ContentLength
+// may be -1 (unknown) or stale, so we mirror the response path and pass
+// int64(len(buf)).
+func (d *debugTransport) logBody(r io.ReadCloser) {
 	defer r.Close()
 	buf, err := io.ReadAll(r)
 	if err != nil {
 		fmt.Fprintf(d.out, "  body: <read error: %v>\n", err)
 		return
 	}
-	d.writeBodyBytes(buf, contentLength)
+	d.writeBodyBytes(buf, int64(len(buf)))
 }
 
 func (d *debugTransport) writeBodyBytes(buf []byte, contentLength int64) {
