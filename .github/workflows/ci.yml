@@ -22,6 +22,14 @@ jobs:
         run: make build
       - name: test
         run: make test
+      - name: govulncheck
+        # Pinned to a specific tag rather than @latest so a new
+        # govulncheck release (with new checks or behaviour changes)
+        # cannot suddenly turn CI red without review. Bump alongside
+        # other tooling pins on the quarterly review cadence.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          govulncheck ./...
 
   lint:
     name: golangci-lint
