@@ -120,7 +120,7 @@ func EnvListTable(w io.Writer, envs []EnvSnapshot) error {
 // use ,omitempty so the queued-only case (most fields empty) emits a compact
 // document.
 type BuildSnapshot struct {
-	BuildId       string `json:"build_id"`
+	BuildID       string `json:"build_id"`
 	Action        string `json:"action,omitempty"`
 	State         string `json:"state"`
 	BranchName    string `json:"branch_name,omitempty"`
@@ -128,7 +128,7 @@ type BuildSnapshot struct {
 	JobStatus     string `json:"job_status,omitempty"`
 	JobStatusText string `json:"job_status_text,omitempty"`
 	PipelineName  string `json:"pipeline_name,omitempty"`
-	ChatId        string `json:"chat_id,omitempty"`
+	ChatID        string `json:"chat_id,omitempty"`
 }
 
 // BuildTable renders a single BuildSnapshot as a two-column key/value table.
@@ -140,7 +140,7 @@ func BuildTable(w io.Writer, b *BuildSnapshot) error {
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	rows := [][2]string{
-		{"BUILD_ID", b.BuildId},
+		{"BUILD_ID", b.BuildID},
 		{"ACTION", b.Action},
 		{"STATE", b.State},
 	}
@@ -154,7 +154,7 @@ func BuildTable(w io.Writer, b *BuildSnapshot) error {
 	addOpt("PIPELINE_NAME", b.PipelineName)
 	addOpt("JOB_STATUS", b.JobStatus)
 	addOpt("JOB_STATUS_TEXT", b.JobStatusText)
-	addOpt("CHAT_ID", b.ChatId)
+	addOpt("CHAT_ID", b.ChatID)
 	for _, r := range rows {
 		if _, err := fmt.Fprintf(tw, "%s\t%s\n", r[0], r[1]); err != nil {
 			return err
@@ -175,7 +175,7 @@ func BuildListTable(w io.Writer, bs []BuildSnapshot) error {
 	}
 	for _, b := range bs {
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			b.BuildId, b.Action, b.State, b.CreatedAt); err != nil {
+			b.BuildID, b.Action, b.State, b.CreatedAt); err != nil {
 			return err
 		}
 	}

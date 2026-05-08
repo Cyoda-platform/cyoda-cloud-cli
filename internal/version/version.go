@@ -1,3 +1,7 @@
+// Package version exposes the binary's build-time version string and the
+// helpers that compose it into HTTP headers (User-Agent +
+// Cyoda-Cloud-CLI-Version per spec §6.8). Version defaults to "dev" and is
+// overwritten at release-build time via -ldflags by GoReleaser.
 package version
 
 import (
@@ -6,8 +10,13 @@ import (
 	"runtime"
 )
 
+// Version is the CLI's semver string. "dev" by default; release builds
+// override via -ldflags "-X .../internal/version.Version=<tag>".
 var Version = "dev"
 
+// UserAgent returns the canonical User-Agent header value for the given
+// version + OS + arch tuple. Spec §6.8 mandates "cyoda-cloud-cli/<ver> (<os>
+// <arch>)".
 func UserAgent(v, os, arch string) string {
 	return fmt.Sprintf("cyoda-cloud-cli/%s (%s %s)", v, os, arch)
 }

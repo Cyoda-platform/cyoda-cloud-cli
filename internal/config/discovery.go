@@ -68,11 +68,11 @@ const maxDiscoveryBody = 64 * 1024
 // need to layer on a context.WithTimeout.
 var discoveryClient = &http.Client{Timeout: 10 * time.Second}
 
-// EnvInsecureDiscovery, when set to "1", relaxes the scheme guard on
-// FetchDiscovery so http:// URLs are accepted. This is a development escape
-// hatch for ad-hoc local testing against an unencrypted mock; production code
-// paths must use https:// or file://. Documented in the error message
-// returned for cleartext URLs.
+// EnvInsecureDiscovery is the env var that, when set to "1", relaxes the
+// scheme guard on FetchDiscovery so http:// URLs are accepted. This is a
+// development escape hatch for ad-hoc local testing against an unencrypted
+// mock; production code paths must use https:// or file://. Documented in
+// the error message returned for cleartext URLs.
 const EnvInsecureDiscovery = "CYODA_CLOUD_INSECURE_DISCOVERY"
 
 // FetchDiscovery retrieves and decodes the discovery document at the given URL.

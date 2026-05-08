@@ -15,7 +15,7 @@ const refreshSkew = 60 * time.Second
 // to Refresh(); tests inject a recorder.
 type RefreshFunc func(ctx context.Context, refreshToken string) (Tokens, error)
 
-// PersistFunc, when non-nil, is invoked after a successful refresh so the
+// PersistFunc is invoked after a successful refresh, when non-nil, so the
 // caller can save the (possibly rotated) refresh token. Errors are returned
 // to the AccessToken caller — failing to persist a rotated RT would silently
 // strand the next process startup.

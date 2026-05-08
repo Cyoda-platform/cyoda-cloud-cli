@@ -237,7 +237,7 @@ func TestEnvListTable_Empty(t *testing.T) {
 
 func TestBuildTable_RendersAllFields(t *testing.T) {
 	snap := &BuildSnapshot{
-		BuildId:       "bld_abc123",
+		BuildID:       "bld_abc123",
 		Action:        "BUILD",
 		State:         "PROCESSING",
 		BranchName:    "main",
@@ -245,7 +245,7 @@ func TestBuildTable_RendersAllFields(t *testing.T) {
 		JobStatus:     "RUNNING",
 		JobStatusText: "compiling user code",
 		PipelineName:  "pipeline-default",
-		ChatId:        "chat_xyz",
+		ChatID:        "chat_xyz",
 	}
 	var buf bytes.Buffer
 	if err := BuildTable(&buf, snap); err != nil {
@@ -271,7 +271,7 @@ func TestBuildTable_RendersAllFields(t *testing.T) {
 
 func TestBuildTable_OmitsEmptyOptionalFields(t *testing.T) {
 	snap := &BuildSnapshot{
-		BuildId: "bld_xyz",
+		BuildID: "bld_xyz",
 		Action:  "BUILD",
 		State:   "QUEUED",
 	}
@@ -309,13 +309,13 @@ func TestBuildTable_Nil(t *testing.T) {
 func TestBuildListTable_RendersList(t *testing.T) {
 	bs := []BuildSnapshot{
 		{
-			BuildId:   "bld_1",
+			BuildID:   "bld_1",
 			Action:    "BUILD",
 			State:     "SUCCESS",
 			CreatedAt: "2026-05-04T10:00:00Z",
 		},
 		{
-			BuildId:   "bld_2",
+			BuildID:   "bld_2",
 			Action:    "DEPLOY",
 			State:     "PROCESSING",
 			CreatedAt: "2026-05-04T11:00:00Z",
@@ -349,7 +349,7 @@ func TestBuildListTable_RendersList(t *testing.T) {
 // emit a cursor on its own and renders rows verbatim regardless.
 func TestBuildListTable_RendersCursor(t *testing.T) {
 	bs := []BuildSnapshot{
-		{BuildId: "bld_only", Action: "BUILD", State: "SUCCESS", CreatedAt: "2026-05-04T10:00:00Z"},
+		{BuildID: "bld_only", Action: "BUILD", State: "SUCCESS", CreatedAt: "2026-05-04T10:00:00Z"},
 	}
 	var buf bytes.Buffer
 	if err := BuildListTable(&buf, bs); err != nil {
