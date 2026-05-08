@@ -14,7 +14,34 @@ make test    # go test -race ./...
 make lint    # golangci-lint run
 ```
 
-Requires Go 1.22 or newer.
+Requires Go 1.26 or newer (matching the `go` directive in `go.mod`).
+
+## Configuration
+
+User-facing environment variables. CLI flag > env var > config file > built-in default.
+
+- `CYODA_CLOUD_DISCOVERY_URL` — override the discovery JSON URL.
+  Accepts `https://` or `file://` schemes.
+- `CYODA_CLOUD_INSECURE_DISCOVERY=1` — accept cleartext `http://` for
+  the discovery URL (development only; ignored in normal operation).
+- `CYODA_CLOUD_LOOPBACK_PORT=<port>` — port for the PKCE-login loopback
+  callback server (default `42777`). The matching
+  `http://127.0.0.1:<port>/callback` must be registered on the Auth0
+  native application.
+- `CYODA_KEYCHAIN_FILE_FALLBACK=1` — write refresh tokens to
+  `~/.config/cyoda-cloud/credentials` (mode `0600`) instead of the OS
+  keychain. Use on headless systems without a keychain daemon.
+- `CYODA_CLOUD_DEBUG=1` — log redacted HTTP request/response traces to
+  stderr. `Authorization`/`Cookie`/`Set-Cookie`/`Proxy-Authorization`
+  headers are redacted; bodies are inlined up to 8 KiB.
+
+Persistent preferences live in `~/.config/cyoda-cloud/config.toml`:
+
+- `default_org` — Auth0 organization slug used when `--org` is omitted.
+- `output_format` — `table` (default) or `json`; equivalent to passing
+  `--output-json` on every command.
+- `discovery_url` — alternative discovery URL; overridden by the env
+  var of the same purpose (`CYODA_CLOUD_DISCOVERY_URL`).
 
 ## Distribution
 
